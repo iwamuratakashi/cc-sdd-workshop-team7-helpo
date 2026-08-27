@@ -75,22 +75,37 @@
   - _Boundary: FaqRouter_
   - _Depends: 1.2, 4.1_
 
-- [ ] 5. FAQ管理・検索画面を実装する
-- [ ] 5.1 FAQ管理画面を実装する
-  - `app/templates/faq/list.html`、`form.html`を作成し、foundationの`base.html`を継承する。
-  - 一覧/作成/編集/削除フォームを提供し、未認証/非管理者は`require_admin`で拒否される。
-  - 完了状態: ブラウザでadminがFAQのCRUDを画面から実行できる。
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5_
+- [ ] 5. FAQ管理画面を実装する
+- [ ] 5.1 FAQ 一覧画面を実装する
+  - `app/templates/faq/list.html` を作成し、foundation の `base.html` を継承する。
+  - ページタイトル「FAQ 管理」、新規作成ボタン、FAQ 一覧テーブル（質問文、最終更新日時、操作列）を表示する。
+  - 登録済み FAQ が 0 件の場合は空状態メッセージを表示する。
+  - 作成・更新・削除成功時のフラッシュメッセージ領域を設ける。
+  - 編集リンク、削除ボタンを配置し、削除前に確認ダイアログを表示する。
+  - 完了状態: ブラウザで `/faqs` にアクセスし、FAQ 一覧と各種操作導線が確認できる。
+  - _Requirements: 1.1, 1.2, 1.3, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5_
   - _Boundary: FaqAdminWebUI_
   - _Depends: 2.2_
-- [ ] 5.2 FAQ検索画面を実装する
-  - `app/templates/faq/search.html`を作成し、管理者向けの検索品質確認画面を提供する。
-  - `GET /search` は `require_admin` を適用し、社員向けメイン検索入口は `/chat`（ai-helpdesk-chat）とする。
-  - 候補と類似度を表示し、適合基準未満の候補は「直接回答不可」として視覚的に区別する。
-  - 完了状態: 管理者が `/search` で問い合わせを入力すると、候補と類似度が表示される。
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
-  - _Boundary: FaqSearchWebUI_
-  - _Depends: 4.2_
+- [ ] 5.2 FAQ 作成・編集フォーム画面を実装する
+  - `app/templates/faq/form.html` を作成し、foundation の `base.html` を継承する。
+  - 質問文・回答文を `textarea` で配置し、両方とも必須項目とする。最大長は質問文 1,000 文字、回答文 10,000 文字とする。
+  - HTML5 `required` 属性と `maxlength` 属性でクライアント側バリデーションを行う。
+  - 未入力・重複質問文・最大長超過などのサーバー側バリデーションエラーを各フィールド近くに表示する。
+  - 作成時は「FAQ を登録」、編集時は「FAQ を編集」というタイトルを切り替える。
+  - 作成フォームは `POST /faqs/new`、編集フォームは `POST /faqs/{id}/edit` へ送信する（HTML form は PUT に非対応のため）。
+  - 編集時のみ削除ボタンを配置し、`confirm()` 後に `fetch()` で `DELETE /api/faqs/{faq_id}` を送信する。JavaScript 無効時のフォールバックとして `POST /faqs/{id}/delete` フォームを併設してもよい。
+  - 完了状態: ブラウザで `/faqs/new` および `/faqs/{id}/edit` から FAQ を作成・編集・削除でき、未入力・重複・最大長超過時にエラーが表示される。
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5_
+  - _Boundary: FaqAdminWebUI_
+  - _Depends: 2.2, 5.1_
+- [ ] 5.3 FAQ 管理画面のアクセス制御とエラー表示を実装する
+  - `app/faq/router.py` の HTML エンドポイントに `require_admin` を適用する。
+  - 未ログイン時は `/login` へ 303 リダイレクトする。
+  - 一般ユーザーアクセス時は 403 応答または専用エラー画面を表示する。
+  - 完了状態: 未認証・非管理者で FAQ 管理画面にアクセスできないことを確認する。
+  - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - _Boundary: FaqRouter, FaqAdminWebUI_
+  - _Depends: 2.2, 5.1_
 
 - [ ] 6. FAQ管理・検索の結合テストと制約検証を実施する
 - [ ] 6.1 FAQ管理・検索の結合テストを作成する
@@ -100,7 +115,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 5.4_
   - _Boundary: FaqTestSuite_
 - [ ] 6.2 ローカルWindows CPU動作のスモークテストを実施する
-  - WindowsのGPUなしPCで`uvicorn`起動、FAQ管理画面/検索画面/管理API/検索APIを手動または自動でSmokeテストする。
+  - WindowsのGPUなしPCで`uvicorn`起動、FAQ管理画面/管理API/検索APIを手動または自動でSmokeテストする。
   - 外部AIサービスへのネットワーク呼び出しが発生しないことを確認する。
   - 完了状態: Windows CPU環境でFAQ作成から類似検索までの一連の動作が確認できる。
   - _Requirements: 5.1, 5.2_
