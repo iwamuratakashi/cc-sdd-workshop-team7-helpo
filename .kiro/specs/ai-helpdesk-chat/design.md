@@ -171,6 +171,33 @@ sequenceDiagram
 - deadlineはglobal generation slotのqueue待機、prompt構築、生成、結果parseを含む。timeout時は取消通知後の短いgraceを待ち、未停止ならterminate/joinし、そのinstanceを破棄する。次回はclean workerを再生成する。
 - source selectionは`is_match=true`だけを`confidence DESC, faq_id ASC`で安定sortする。chatは閾値を持たない。
 
+### 入力処理ふるまい
+
+#### 正常系フロー
+1. 認証済み社員が1〜400文字のUTF-8フリーテキストで質問を入力・送信する。
+2. `FaqSearchService.search`がハイブリッド検索（意味検索＋キーワード検索）により質問の意図を理解し、上位FAQ候補を取得する（`top_k=5`）。
+3. `is_match=true`の候補のみを根拠として、ローカルLLMが短文回答を生成する。
+4. 画面上部にAIの回答を表示し、画面下部に出典FAQ（根拠FAQ一覧）を表示する。
+
+#### 異常系ふるまい
+
+| 条件 | ふるまい | 表示内容 |
+|------|---------|---------|
+| 質問内容がFAQに存在しない（`no_match`） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内（根拠FAQセクションなし） |
+| 401文字以上の入力 | 処理・保存なしで入力エラーを返す | 入力エラーメッセージ（文字数超過）、送信済み入力内容を保持 |
+| 0文字（空または空白のみ）の入力 | 処理・保存なしで入力エラーを返す | 入力エラーメッセージ（必須入力） |
+| 未認証アクセス（チャット画面） | 認証ページへ303リダイレクト | エラーメッセージなし（リダイレクト） |
+| 未認証アクセス（API） | JSON 401を返す | 本文なし |
+| 他人の履歴へのアクセス（管理者含む） | 403 Forbiddenを返す | エラーメッセージ |
+
+#### 境界値
+
+| 入力文字数（trim後） | ふるまい |
+|---------------------|---------|
+| 0字 | 入力エラーメッセージを表示（処理・保存なし） |
+| 1字〜400字 | FAQ検索・回答生成を実行し結果を表示 |
+| 401字以上 | 入力エラーメッセージを表示（処理・保存なし） |
+
 ### 状態flow
 
 ```mermaid
@@ -501,6 +528,18 @@ class HistoryDetailResponse(ChatAnswerResponse):
 - `question`はtrim後1..`max_question_chars`、`limit`は1..100、`offset >= 0`。datetimeはUTC ISO 8601 JSON、confidenceは0..1。
 - `sources=[]`は窓口案内を表す。FAQ更新後もsnapshot値を返し、`current_faq_id=None`なら`is_deleted=true`である。
 
+#### 入力仕様（質問フィールド）
+
+| 項目 | 仕様 |
+|------|------|
+| 型 | 文字列（UTF-8） |
+| 形式 | フリーテキスト |
+| 必須 | 必須入力（空文字・空白のみ不可） |
+| 文字数上限 | 400文字以下（`ChatSettings.max_question_chars = 400`） |
+| 境界値 | 0字: 入力エラー、1〜400字: 処理実行、401字以上: 入力エラー |
+
+trim後の文字数で評価する。空または空白のみの入力は文字数0として扱い、エラーとする。
+
 #### ChatRouter
 
 | Method | Endpoint | Request | Response | Errors | Idempotency / Notes |
@@ -516,6 +555,20 @@ class HistoryDetailResponse(ChatAnswerResponse):
 - 詳細は存在確認後に`require_owner(current, history.owner_user_id)`を必ず呼び、admin bypassを加えない。
 - 同一requestがpersist済みなら同じ200 responseを返す。同時in-flightで競合行をまだ再読できない場合だけ409 retryable response `{"detail":"Request is still processing","retryable":true}` とし、新規履歴を作らない。
 - UIは送信ごとにUUIDを一度生成しretryで再利用する。button disable/処理中表示はUX補助であり、DB制約を置換しない。全textはHTML escapeする。
+
+#### UI画面レイアウト
+
+| 処理結果 | 表示内容 | 表示位置 |
+|---------|---------|---------|
+| 処理成功（`generated` / `direct_faq`） | AIの回答テキスト | 画面上部 |
+| 処理成功（`generated` / `direct_faq`） | 出典FAQ一覧（根拠FAQ） | 画面下部 |
+| 適合FAQなし（`no_match` / `search_unavailable`） | 「出典が見つかりません」＋窓口案内 | 画面上部（出典セクションなし） |
+| 入力エラー（0字 / 401字以上） | 入力エラーメッセージ | 画面上部（入力欄は入力内容を保持） |
+| 権限エラー（未認証 / 他人履歴） | エラーメッセージ | 画面上部 |
+| システムエラー | 共通エラーメッセージ（内部詳細なし） | 画面上部 |
+
+- `no_match`・`search_unavailable`の場合、「出典が見つかりません」とともに`contact_guidance`（人事・総務窓口案内）を表示する。根拠FAQセクション（`sources`）は表示しない。
+- 入力エラーは処理・履歴保存を一切行わず、送信済み入力内容を保持して利用者が修正できる状態にする。
 
 ## Data Models
 
