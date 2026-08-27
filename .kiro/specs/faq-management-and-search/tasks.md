@@ -1,0 +1,107 @@
+# Implementation Plan
+
+## 実装タスク
+
+- [ ] 1. FAQ用スキーマと設定を追加する
+- [ ] 1.1 FAQとEmbeddingテーブルのマイグレーションを追加する
+  - `migrations/003_faq_management_and_search.sql` を作成し、`faq`テーブルと`faq_embedding`テーブル、`faq_embedding.faq_id`の一意索引を定義する。
+  - 外部キーは`faq.id`への`ON DELETE CASCADE`とし、foundationの`MigrationRunner`で適用する。
+  - 完了状態: 空DBおよび`002_local_user_authentication.sql`適用済みDBの双方にマイグレーションが成功し、`faq`/`faq_embedding`テーブルが存在する。
+  - _Requirements: 1.1, 1.5, 3.1, 3.3, 5.2_
+  - _Boundary: FaqMigration_
+- [ ] 1.2 FAQ用設定を feature-local に追加する
+  - `app/faq/settings.py` に `FaqSettings` を作成し、Embeddingモデル固有の設定を含む。
+  - foundation の `ConfigManager` 拡張ポイントを通じて読み込み・検証する。
+  - 適合基準は実装所有の固定値とし、運用者向け設定としては提供しない。
+  - `app/config.py` は直接変更しない。
+  - 完了状態: FAQ固有設定が読み込まれ、不正値は起動前に拒否される。
+  - _Requirements: 5.1_
+  - _Boundary: FaqSettings_
+
+- [ ] 2. FAQ管理のCRUDを実装する
+- [ ] 2.1 FAQエンティティとリポジトリを実装する
+  - `app/faq/models.py`に`Faq`を、`BaseEntity`を継承して定義する。
+  - `app/faq/repositories.py`に`FaqRepository`を作成し、作成/一覧/取得/更新/削除を提供する。
+  - 完了状態: テスト用DBでFAQのCRUDがトランザクション内で一貫して動作する。
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+  - _Boundary: FaqRepository_
+- [ ] 2.2 FAQ管理APIを実装する
+  - `app/faq/router.py`に`GET /api/faqs`、`POST /api/faqs`、`PUT /api/faqs/{faq_id}`、`DELETE /api/faqs/{faq_id}`を追加する。
+  - local-user-authenticationの`require_admin`を管理エンドポイントの`Depends`に指定し、未認証/非管理者を401/403で拒否する。
+  - 入力検証はPydanticスキーマで行い、必須項目欠落は422、重複質問文は409とする。
+  - 完了状態: adminでFAQのCRUDがHTTPで成功し、一般利用者/未認証は拒否される。
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5_
+  - _Boundary: FaqRouter_
+  - _Depends: 1.2, 2.1_
+
+- [ ] 3. ローカルEmbeddingと索引を実装する
+- [ ] 3.1 ローカルEmbeddingアダプターを実装する
+  - `app/faq/embedding.py`に`FaqEmbeddingAdapter`を作成し、設定された`local_embedding_path`があればロードする。
+  - 未設定または未検証のモデルは自動選択せず、`is_ready()`でFalseを返す。外部AIサービスへの送信は行わない。
+  - `encode(text: str) -> np.ndarray`をCPUで実行可能な形式で提供する。
+  - 完了状態: モックまたは有効なローカルモデルパスで質問文からfloat32ベクトルが取得できる。
+  - _Requirements: 3.1, 3.5, 3.6, 5.1, 5.3_
+  - _Boundary: FaqEmbeddingAdapter_
+- [ ] 3.2 FAQ作成・更新時のEmbedding永続化を実装する
+  - `app/faq/services.py`に`FaqEmbeddingService`を作成し、FAQ保存時に質問文をencodeして`faq_embedding`へupsertする。
+  - トランザクション境界は呼び出し元に委ね、Repository内で`commit()`は行わない。
+  - 完了状態: FAQ作成/更新後に`faq_embedding`テーブルに対応するベクトルレコードが存在する。
+  - _Requirements: 3.1, 3.2, 3.5_
+  - _Boundary: FaqEmbeddingService_
+  - _Depends: 2.2, 3.1_
+- [ ] 3.3 検索索引と整合性維持を実装する
+  - `app/faq/search_index.py`に`FaqSearchIndex`を作成し、`build(db)`でDBから全ベクトルを読み出してインメモリ索引を構築する。
+  - `search(query_vector, top_k)` はインメモリ全探索であり、検索時にDB接続を必要としない。
+  - FAQ追加/更新/削除時に`upsert`/`remove`を呼び、起動時または不整合検出時に`build()`で再構築する。
+  - 完了状態: FAQ変更後の検索結果が最新のDB内容を反映する。
+  - _Requirements: 3.3, 3.4_
+  - _Boundary: FaqSearchIndex_
+  - _Depends: 3.2_
+
+- [ ] 4. 類似検索と適合判定を実装する
+- [ ] 4.1 類似検索サービスを実装する
+  - `app/faq/services.py`に`FaqSearchService`を作成し、`search(db, query, top_k=5)` のシグネチャでクエリをencode、`FaqSearchIndex`で上位K件を取得する。
+  - `FaqRepository`でFAQ詳細を取得し、生のコサイン類似度を 0 から 1 に正規化・クランプして `confidence` とする。
+  - 実装所有の固定適合基準を適用して `is_match`/`has_match` を判定する。
+  - 完了状態: サンプル質問に対し、正しいFAQ候補が類似度順に返り、適合判定が正しく動作する。
+  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+  - _Boundary: FaqSearchService_
+  - _Depends: 3.3_
+- [ ] 4.2 検索APIを実装する
+  - `app/faq/router.py`に`POST /api/faqs/search`を追加し、`require_authenticated_user`を`Depends`に指定する。
+  - レスポンスは`FaqSearchResult`スキーマに従い、適合基準未満の候補は`is_match=False`とする。Embedding未準備時は503を返す。
+  - 完了状態: 認証済み利用者が問い合わせを送信すると、適合基準以上の候補が`is_match=True`で返る。
+  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+  - _Boundary: FaqRouter_
+  - _Depends: 1.2, 4.1_
+
+- [ ] 5. FAQ管理・検索画面を実装する
+- [ ] 5.1 FAQ管理画面を実装する
+  - `app/templates/faq/list.html`、`form.html`を作成し、foundationの`base.html`を継承する。
+  - 一覧/作成/編集/削除フォームを提供し、未認証/非管理者は`require_admin`で拒否される。
+  - 完了状態: ブラウザでadminがFAQのCRUDを画面から実行できる。
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5_
+  - _Boundary: FaqAdminWebUI_
+  - _Depends: 2.2_
+- [ ] 5.2 FAQ検索画面を実装する
+  - `app/templates/faq/search.html`を作成し、管理者向けの検索品質確認画面を提供する。
+  - `GET /search` は `require_admin` を適用し、社員向けメイン検索入口は `/chat`（ai-helpdesk-chat）とする。
+  - 候補と類似度を表示し、適合基準未満の候補は「直接回答不可」として視覚的に区別する。
+  - 完了状態: 管理者が `/search` で問い合わせを入力すると、候補と類似度が表示される。
+  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+  - _Boundary: FaqSearchWebUI_
+  - _Depends: 4.2_
+
+- [ ] 6. FAQ管理・検索の結合テストと制約検証を実施する
+- [ ] 6.1 FAQ管理・検索の結合テストを作成する
+  - `tests/test_faq.py`に、FAQ CRUD/認可、Embedding更新/索引同期、類似検索/適合判定、503応答を検証するテストを作成する。
+  - foundationのASGIアプリ、DBセッション、マイグレーション、認証を通して実行する。
+  - 完了状態: `pytest`ですべてのFAQ関連テストが合格する。
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3, 5.4_
+  - _Boundary: FaqTestSuite_
+- [ ] 6.2 ローカルWindows CPU動作のスモークテストを実施する
+  - WindowsのGPUなしPCで`uvicorn`起動、FAQ管理画面/検索画面/管理API/検索APIを手動または自動でSmokeテストする。
+  - 外部AIサービスへのネットワーク呼び出しが発生しないことを確認する。
+  - 完了状態: Windows CPU環境でFAQ作成から類似検索までの一連の動作が確認できる。
+  - _Requirements: 5.1, 5.2_
+  - _Boundary: FaqTestSuite_
