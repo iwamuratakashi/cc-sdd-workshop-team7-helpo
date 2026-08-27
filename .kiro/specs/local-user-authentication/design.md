@@ -20,6 +20,7 @@ local-user-authenticationは、helpo-foundation上にローカル資格情報、
 - 分析、監査証跡、SSO、外部IdP、MFA
 - 部署・役職・権限集合を扱う高度なRBAC
 - 利用者管理画面、パスワード再設定、任意ロール編集
+- 利用者ID単位でのログインロック（本仕様はブラウザ単位のみを扱い、他者の利用者名を用いたロックによるDoSを避ける）
 
 ## Boundary Commitments
 
@@ -29,6 +30,7 @@ local-user-authenticationは、helpo-foundation上にローカル資格情報、
 - 不変ユーザーID、一意なユーザー名、有効状態、`user`/`admin`基本ロール
 - ログイン、ログアウト、現在利用者取得のHTTP/UIフロー
 - `require_authenticated_user`、`require_admin`、`require_owner`の認証・認可境界
+- ブラウザ単位のログイン試行追跡と連続失敗時のロック（ブルートフォース対策）
 
 ### Out of Boundary
 
@@ -54,6 +56,7 @@ local-user-authenticationは、helpo-foundation上にローカル資格情報、
 - `CurrentUser`、`Role`、認証依存関数の型・失敗ステータス変更
 - ユーザーIDの型、基本ロール値、所有者比較規則の変更
 - Cookie名・属性、セッション有効期間、保存方式の変更
+- ログイン試行しきい値、ロック期間、試行追跡用Cookieの識別方式の変更
 - 後続仕様が管理者による全履歴閲覧または追加ロールを要求する場合
 
 ## Architecture
@@ -73,6 +76,7 @@ graph TB
     AuthRouter --> AuthService
     AuthRouter --> AuthContext
     AuthRouter --> AuthWebUI
+    AuthRouter --> LoginAttemptGuard
     AuthService --> PasswordHasher
     AuthService --> UserRepository
     AuthService --> SessionRepository
@@ -81,6 +85,8 @@ graph TB
     AuthContext --> AuthorizationPolicy
     UserRepository --> FoundationPersistence
     SessionRepository --> FoundationPersistence
+    LoginAttemptGuard --> LoginAttemptRepository
+    LoginAttemptRepository --> FoundationPersistence
     AuthWebUI --> FoundationLayout
     DownstreamFAQ --> AuthContext
     DownstreamChat --> AuthContext
@@ -89,10 +95,10 @@ graph TB
 **Architecture Integration**:
 
 - Selected pattern: foundationの層構造へ追加するサーバー管理セッション方式。Cookie署名だけに利用者状態を保持せず、失効を即時反映する。
-- Domain boundaries: AuthServiceは本人確認とセッション、AuthContextは現在利用者解決、AuthorizationPolicyはロール・所有者ID比較だけを所有する。
+- Domain boundaries: AuthServiceは本人確認とセッション、AuthContextは現在利用者解決、AuthorizationPolicyはロール・所有者ID比較、LoginAttemptGuardはブラウザ単位の失敗回数追跡とロック判定だけを所有する。
 - Existing patterns preserved: foundationの設定、Session注入、BaseEntity/BaseRepository、マイグレーション、Jinja2、共通エラー処理を再利用する。
-- Build vs adopt: パスワードハッシュは独自実装せずArgon2idを採用する。セッションは小規模ローカルMVPに必要な失効性をSQLiteで最小実装する。
-- Simplification: OAuth2/OIDC、JWT、権限テーブル、監査イベント、利用者管理UIは導入しない。
+- Build vs adopt: パスワードハッシュは独自実装せずArgon2idを採用する。セッションは小規模ローカルMVPに必要な失効性をSQLiteで最小実装する。ログイン試行制限も外部レートリミッタは導入せず、SQLiteの最小テーブルで実装する。
+- Simplification: OAuth2/OIDC、JWT、権限テーブル、監査イベント、利用者管理UI、外部WAF/レートリミッタは導入しない。
 
 ### Technology Stack
 
@@ -100,7 +106,7 @@ graph TB
 |-------|------------------|-----------------|-------|
 | Backend | Python 3.10+ / FastAPI 0.115+ | ルーティング、依存注入、Cookie | foundationと同一 |
 | Security | argon2-cffi 23.1+ | Argon2idハッシュ・検証 | 平文・復号可能保存は禁止 |
-| Data | SQLAlchemy 2.x / SQLite | users・auth_sessions永続化 | foundationのEngine/Sessionを共有 |
+| Data | SQLAlchemy 2.x / SQLite | users・auth_sessions・login_attempt_trackers永続化 | foundationのEngine/Sessionを共有 |
 | UI | Jinja2 | ログイン画面と認証状態表示 | foundationのbase.htmlを継承 |
 
 ## File Structure Plan
@@ -116,10 +122,11 @@ helpo/
 │   ├── auth/                           # local-user-authentication所有
 │   │   ├── __init__.py
 │   │   ├── settings.py                 # AuthSettings
-│   │   ├── models.py                   # User・AuthSession ORMモデル
-│   │   ├── repository.py               # UserRepository・SessionRepository
+│   │   ├── models.py                   # User・AuthSession・LoginAttemptTracker ORMモデル
+│   │   ├── repository.py               # UserRepository・SessionRepository・LoginAttemptRepository
 │   │   ├── service.py                  # AuthService
 │   │   ├── password_hasher.py          # PasswordHasher
+│   │   ├── lockout.py                  # LoginAttemptGuard
 │   │   ├── dependencies.py             # 認証・認可用依存関数
 │   │   ├── schemas.py                  # Role・CurrentUser・要求応答型
 │   │   ├── router.py                   # AuthRouter
@@ -138,9 +145,10 @@ helpo/
 ### Modified Files
 
 - `pyproject.toml` — `argon2-cffi`依存を追加する。
-- `app/auth/settings.py` — 認証専用設定を feature-local に定義し、foundation の `ConfigManager` 拡張ポイントを通じて検証する。
+- `app/auth/settings.py` — 認証専用設定を feature-local に定義し、foundation の `ConfigManager` 拡張ポイントを通じて検証する。ログイン試行制限のしきい値・ロック期間・追跡用Cookie名も含める。
 - `app/auth/dependencies.py` — 認証・認可に必要な FastAPI 依存関数を feature-local に公開する。
-- `app/auth/router.py` — `AuthRouter` を実装し、foundation の `RouterRegistry` 拡張インターフェースを通じて登録する。
+- `app/auth/router.py` — `AuthRouter` を実装し、foundation の `RouterRegistry` 拡張インターフェースを通じて登録する。ログイン処理に `LoginAttemptGuard` を組み込む。
+- `app/auth/lockout.py` — `LoginAttemptGuard` を新規実装し、ブラウザ単位の失敗回数追跡とロック判定を提供する。
 - `app/templates/auth/_nav.html` — foundation の `base.html` 拡張ブロック（nav/header）を経由して認証状態ナビゲーションを提供する。
 - foundation の `app/router_registry.py` — `AuthRouter` が登録される。
 
@@ -152,21 +160,37 @@ helpo/
 sequenceDiagram
     participant Browser
     participant AuthRouter
+    participant LoginAttemptGuard
     participant AuthService
     participant UserRepository
     participant PasswordHasher
     participant SessionRepository
-    Browser->>AuthRouter: 資格情報送信
-    AuthRouter->>AuthService: authenticate
-    AuthService->>UserRepository: find by username
-    AuthService->>PasswordHasher: verify
-    AuthService->>SessionRepository: create token digest
-    SessionRepository-->>AuthService: session expiry
-    AuthService-->>AuthRouter: raw token once
-    AuthRouter-->>Browser: session cookie and redirect
+    Browser->>AuthRouter: 資格情報送信 + 試行追跡Cookie
+    AuthRouter->>LoginAttemptGuard: is_locked?
+    alt ロック中
+        LoginAttemptGuard-->>AuthRouter: locked
+        AuthRouter-->>Browser: 429 ロック中の共通メッセージ
+    else 試行可能
+        LoginAttemptGuard-->>AuthRouter: allowed
+        AuthRouter->>AuthService: authenticate
+        AuthService->>UserRepository: find by username
+        AuthService->>PasswordHasher: verify
+        alt 認証失敗
+            AuthService-->>AuthRouter: InvalidCredentials
+            AuthRouter->>LoginAttemptGuard: register_failure
+            LoginAttemptGuard-->>AuthRouter: failed_count / locked_until
+            AuthRouter-->>Browser: 400 共通エラーメッセージ + 試行追跡Cookie
+        else 認証成功
+            AuthService->>SessionRepository: create token digest
+            SessionRepository-->>AuthService: session expiry
+            AuthService-->>AuthRouter: raw token once
+            AuthRouter->>LoginAttemptGuard: register_success (reset)
+            AuthRouter-->>Browser: session cookie and redirect
+        end
+    end
 ```
 
-生トークンはCookie設定時だけ返し、DBにはSHA-256ダイジェストのみ保存する。認証失敗理由は`InvalidCredentials`へ正規化する。
+生トークンはCookie設定時だけ返し、DBにはSHA-256ダイジェストのみ保存する。認証失敗理由は`InvalidCredentials`へ正規化する。試行追跡Cookieは利用者名に依存しない匿名の乱数トークンであり、初回アクセス時または失敗時に発行し、DBにはSHA-256ダイジェストのみ保存する。
 
 ### 保護対象アクセスと認可
 
@@ -202,6 +226,7 @@ AuthContextはFAQ・履歴レコードを取得しない。所有者IDは後続�
 | 6.1, 6.2, 6.3, 6.5 | 401・403・500処理 | AuthRouter, AuthContext | API, Service | 保護対象アクセス |
 | 6.4 | 機密情報非露出 | 全認証コンポーネント | Service, API, State | 両フロー |
 | 7.1, 7.2, 7.3 | ローカルMVP | AuthSettings, AuthMigration | Service, State | 両フロー |
+| 8.1, 8.2, 8.3, 8.4, 8.5, 8.6 | ログイン試行制限とロック | LoginAttemptGuard, LoginAttemptRepository, AuthRouter | Service, State, API | ログイン |
 
 ## Components and Interfaces
 
@@ -216,14 +241,17 @@ AuthContextはFAQ・履歴レコードを取得しない。所有者IDは後続�
 | AuthService | Domain Service | 資格情報検証とセッション操作 | 2.1, 2.2, 2.3, 2.4, 3.2, 3.3, 3.4 | repositories P0, PasswordHasher P0 | Service |
 | AuthContext | Runtime | Cookieから現在利用者を解決 | 4.1, 4.3, 4.4, 5.1, 6.2 | repositories P0 | Service |
 | AuthorizationPolicy | Domain Policy | 管理者・本人所有判定 | 5.2, 5.3, 5.4, 6.3 | AuthContext P0 | Service |
-| AuthRouter | API | ログイン・ログアウト・現在利用者HTTP | 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 6.1, 6.2, 6.3, 6.4, 6.5 | AuthService P0, ErrorHandler P1 | API |
+| AuthRouter | API | ログイン・ログアウト・現在利用者HTTP | 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 6.1, 6.2, 6.3, 6.4, 6.5, 8.2, 8.3, 8.4 | AuthService P0, LoginAttemptGuard P0, ErrorHandler P1 | API |
 | AuthWebUI | UI | ログインフォームとナビ表示 | 4.2, 6.1, 6.4 | WebLayout P0 | State |
+| LoginAttemptRepository | Data Access | 試行追跡の永続化・失効 | 8.1, 8.2, 8.5, 8.6 | foundation Session P0 | Service, State |
+| LoginAttemptGuard | Domain Policy | ブラウザ単位の失敗回数判定とロック制御 | 8.1, 8.2, 8.3, 8.4, 8.5, 8.6 | LoginAttemptRepository P0, AuthSettings P0 | Service |
 
 ### AuthSettings
 
 - 本仕様は `app/auth/settings.py` に `AuthSettings` を feature-local に定義し、foundation の `ConfigManager` 拡張ポイントを通じて読み込み・検証する。
-- 含める項目：`auth_session_cookie_name: str`、`auth_session_ttl_seconds: int`、`auth_cookie_secure: bool`。
+- 含める項目：`auth_session_cookie_name: str`、`auth_session_ttl_seconds: int`、`auth_cookie_secure: bool`、`auth_attempt_cookie_name: str`、`auth_lockout_threshold: int`、`auth_lockout_duration_seconds: int`。
 - 既定値はローカルHTTP向けにCookie名`helpo_session`、TTL 8時間、Secure falseとする。HttpOnly=true、SameSite=laxは固定する。
+- ログイン試行制限の既定値は追跡Cookie名`helpo_login_attempt`、しきい値5回、ロック期間900秒（15分）とする。
 - セッション秘密を設定へ保存しない。ランダムトークンをサーバー側照合するためである。
 - foundation の `app/config.py` は直接変更しない。
 
@@ -278,6 +306,26 @@ class AuthService:
 - `secrets.token_urlsafe(32)`以上でトークンを生成し、DBにはSHA-256ダイジェストだけを保存する。
 - logoutはトークンが不明・失効済みでも成功扱いとする冪等操作である。
 
+### LoginAttemptRepository and LoginAttemptGuard
+
+```python
+class LoginAttemptRepository:
+    def get_or_create(self, db: Session, tracker_token_digest: str, now: datetime) -> LoginAttemptTracker: ...
+    def record_failure(self, db: Session, tracker_token_digest: str, now: datetime, threshold: int, lockout_duration: timedelta) -> LoginAttemptTracker: ...
+    def reset(self, db: Session, tracker_token_digest: str, now: datetime) -> None: ...
+
+class LoginAttemptGuard:
+    def is_locked(self, db: Session, tracker_token_digest: str, now: datetime) -> bool: ...
+    def register_failure(self, db: Session, tracker_token_digest: str, now: datetime) -> None: ...
+    def register_success(self, db: Session, tracker_token_digest: str, now: datetime) -> None: ...
+```
+
+- 追跡対象はユーザー名やユーザーIDではなく、ブラウザに紐づく匿名の乱数トークン（`secrets.token_urlsafe(32)`以上）とする。DBには`auth_sessions`と同様にSHA-256ダイジェストのみを保存する。
+- 追跡Cookieが存在しない場合、`GET /login`または最初の`POST /login`時に新規発行する。既存の`auth_session_cookie_name`とは独立したCookieであり、認証済み状態を表さない。
+- `failed_count`が`auth_lockout_threshold`以上に達した時点で`locked_until = now + auth_lockout_duration_seconds`を設定する。ロック中は資格情報の正誤を検証する前に拒否し、`AuthRouter`は`InvalidCredentials`と同一の共通メッセージ形状（列挙耐性）を維持したまま429を返す。
+- ログイン成功時は`reset`で`failed_count`と`locked_until`をクリアする。ロック期間経過後は`is_locked`がfalseを返し、通常のログイン処理を再開する。
+- ユーザーID単位ではなくブラウザ単位で追跡することで、第三者が他人のユーザー名を用いて意図的にそのアカウントをロックするDoSを防ぐ。
+
 ### AuthContext and AuthorizationPolicy
 
 ```python
@@ -304,12 +352,12 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 | Method | Endpoint | Request | Response | Errors |
 |--------|----------|---------|----------|--------|
 | GET | `/login` | - | HTML | 認証済みは`/`へ303 |
-| POST | `/login` | form username, password | Cookie設定後`/`へ303 | 400共通認証失敗, 500汎用 |
+| POST | `/login` | form username, password + 試行追跡Cookie | Cookie設定後`/`へ303 | 400共通認証失敗, 429ロック中, 500汎用 |
 | POST | `/logout` | session Cookie | Cookie削除後`/login`へ303 | 500汎用 |
 | GET | `/api/auth/me` | session Cookie | `CurrentUser` JSON | 401, 500 |
 
-- CookieはPath=/、HttpOnly、SameSite=Lax、設定駆動Secure、Max-Age=TTLとする。
-- 401は`{"detail":"Authentication required"}`、403は`{"detail":"Forbidden"}`とし、対象の存在や失敗理由を公開しない。
+- CookieはPath=/、HttpOnly、SameSite=Lax、設定駆動Secure、Max-Age=TTLとする。試行追跡Cookieも同一属性とし、`auth_lockout_duration_seconds`より十分長いMax-Ageを設定する。
+- 401は`{"detail":"Authentication required"}`、403は`{"detail":"Forbidden"}`とし、対象の存在や失敗理由を公開しない。429は`{"detail":"Too many login attempts"}`とし、ロック解除時刻や利用者存在有無を含めない。
 - 予期しない例外は独自レスポンスへ変換せずfoundation ErrorHandlerへ委譲する。
 
 ### AuthWebUI
@@ -325,6 +373,7 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - **User**: 認証主体。`id`はfoundation `BaseEntity.id`を継承する不変の整数ID。
 - **AuthSession**: 1利用者に複数存在し得るサーバー側セッション。生トークンは所有しない。
 - **CurrentUser**: 後続仕様へ渡す読み取り専用値。`id`、`username`、`role`だけを含む。
+- **LoginAttemptTracker**: 利用者に紐づかないブラウザ単位のログイン失敗追跡。生トークンは所有しない。
 
 ### Physical Data Model
 
@@ -353,9 +402,22 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 | created_at | DATETIME | NOT NULL、BaseEntity |
 | updated_at | DATETIME | NOT NULL、BaseEntity |
 
+**login_attempt_trackers**
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | INTEGER | PK、BaseEntity |
+| tracker_token_digest | CHAR(64) | NOT NULL、UNIQUE |
+| failed_count | INTEGER | NOT NULL、default 0 |
+| locked_until | DATETIME | NULL |
+| last_attempt_at | DATETIME | NOT NULL |
+| created_at | DATETIME | NOT NULL、BaseEntity |
+| updated_at | DATETIME | NOT NULL、BaseEntity |
+
 - 日時はUTCで保存し、比較もUTCで行う。
 - 利用者削除は通常運用で行わず無効化する。物理削除時は関連セッションをCASCADE削除する。
 - セッション作成・ログアウト失効は単一のfoundation Sessionトランザクションで行う。
+- `login_attempt_trackers`は`users`と外部キー関係を持たない。ロック判定・失敗計数・成功時リセットも単一のfoundation Sessionトランザクションで行う。
 
 ### API Data Transfer
 
@@ -376,6 +438,7 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - 認証失敗は理由を統合して列挙耐性を確保する。
 - 未認証は401、認証済みのロール不足・所有者不一致は403とする。
 - HTML保護画面だけは未認証を`/login`へ303誘導する。
+- ブラウザ単位のログイン試行がしきい値を超えた場合は429とし、資格情報の検証結果や利用者存在有無を明かさない。
 - DB・予期しない例外はrollback後に再送出し、foundationの汎用500応答と詳細サーバーログへ委譲する。
 
 ### Error Categories and Responses
@@ -384,12 +447,14 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - **401 Authentication required**: セッションなし、失効、期限切れ、不明トークン。
 - **403 Forbidden**: admin不足、所有者ID不一致。
 - **409 Conflict**: ローカル利用者登録処理での重複ユーザー名。利用者管理UIは本仕様外。
+- **429 Too many login attempts**: 同一ブラウザからの連続失敗がしきい値に達しロック中。ロック解除時刻は返さない。
 - **500 Internal server error**: foundation契約の汎用JSONまたは共通HTML。秘密値をログへ含めない。
 
 ### Monitoring
 
 - 成功ログはユーザーIDとイベント種別だけを記録し、ユーザー名の記録は必要最小限とする。
 - 失敗ログはイベント種別・時刻・要求パスを記録し、資格情報、ハッシュ、トークン、Cookieを記録しない。
+- ロック発生・解除もイベント種別・時刻だけを記録し、試行追跡トークンやユーザー名は記録しない。
 - 監査証跡・分析データの永続化は行わない。
 
 ## Testing Strategy
@@ -400,6 +465,7 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - UserRepository: 正規化名の一意性、`user`/`admin`制約、無効利用者（1.1, 1.3, 1.4, 2.3）。
 - SessionRepository: 有効、期限切れ、失効、不明トークンと冪等失効（3.1, 3.2, 3.3, 3.4）。
 - AuthorizationPolicy: admin判定、厳密な所有者ID一致、adminにもownerバイパスがないこと（5.1, 5.2, 5.3, 5.4, 6.3）。
+- LoginAttemptGuard/LoginAttemptRepository: しきい値未満は許可、しきい値到達でロック、ロック期間経過後の解放、成功時のリセット、ユーザー名に依存しないこと（8.1, 8.2, 8.3, 8.5, 8.6）。
 
 ### Integration Tests
 
@@ -407,6 +473,8 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - ログイン成功時のCookie属性、`/api/auth/me`、ログアウト後401を同一TestClientで検証する（2.1, 3.1, 3.2, 4.1）。
 - 不明ユーザー・誤パスワード・無効ユーザーが同じ応答であること（2.2, 2.3）。
 - DB例外時にrollbackされ、foundationの汎用500契約が維持されること（6.5）。
+- 同一ブラウザで5回連続失敗後に429となり、正しい資格情報でもロック中はログインできないこと。ロック期間経過後または成功時のリセット後に再度ログインできること（8.2, 8.3, 8.5, 8.6）。
+- 異なる試行追跡Cookie（別ブラウザ相当）からは独立してカウントされ、他者の失敗によってロックされないこと（8.1）。
 
 ### E2E / UI Tests
 
@@ -414,6 +482,7 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - 認証済みでユーザー名・ロール・ログアウトがbase layoutに表示される（4.2）。
 - 期限切れCookieで保護情報が表示されず、再ログインで異なるセッションが発行される（3.3, 3.4）。
 - 外部ネットワーク・外部IdPなしのWindowsローカル構成でログインからログアウトまで完了する（7.1, 7.2, 7.3）。
+- 連続5回のログイン失敗後、ログイン画面がロック中の共通メッセージを表示し、利用者存在有無を明かさないこと（8.3, 8.4）。
 
 ## Security Considerations
 
@@ -423,15 +492,18 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 - CookieはHttpOnly・SameSite=Lax・Path=/を必須とし、HTTPS環境では設定でSecureを有効にする。
 - ログイン失敗は列挙可能な差異を作らない。機密値はレスポンス、テンプレート、例外文字列、ログから除外する。
 - CSRF対策としてSameSite=Laxを最低条件とし、状態変更はPOSTに限定する。将来クロスサイト要件が生じた場合はCSRF token導入を再検証する。
+- パスワード総当たり攻撃に対しては、ブラウザ単位の匿名トークンで連続失敗を追跡し、しきい値到達で一定時間ロックする。追跡対象をユーザーIDではなくブラウザ単位とすることで、第三者が他者のユーザー名を使って意図的にそのアカウントをロックするDoSを防止する。
+- ロック中の応答はロック解除時刻・利用者存在有無を含めず、401/400と同様に列挙耐性を維持する。
 
 ## Performance & Scalability
 
 - 一人または少人数のローカル利用を対象とし、セッション解決は`token_digest`一意索引による単一検索とする。
 - Argon2idコストは対象Windows CPUでログイン操作が実用的な範囲か結合テスト時に確認する。
 - 期限切れセッションの定期削除ジョブは本MVP外とし、将来レコード増加が問題になった時点で再検証する。
+- ログイン試行追跡も`tracker_token_digest`一意索引による単一検索とし、期限切れ・未使用トラッカーの定期削除は本MVP外とする。
 
 ## Migration Strategy
 
 - foundationのベースライン適用後に`002_local_user_authentication.sql`を適用する。
-- マイグレーションは新規テーブル・索引のみを追加し、foundation既存テーブルを変更しない。
+- マイグレーションは`users`・`auth_sessions`・`login_attempt_trackers`の新規テーブル・索引のみを追加し、foundation既存テーブルを変更しない。
 - 適用失敗時は起動を中止し、foundationのfail-fast起動エラー契約に従う。
