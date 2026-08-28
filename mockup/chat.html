@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI社内ヘルプデスク - チャット</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Meiryo", "Noto Sans JP", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== Header (WebLayout mock) ===== */
+    .header {
+      background: #2563eb;
+      color: #fff;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ===== Mockup Controls ===== */
+    .mockup-controls {
+      background: #fef3c7;
+      border-bottom: 2px solid #f59e0b;
+      padding: 16px 32px;
+    }
+
+    .mockup-controls-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #92400e;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .mockup-btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .mockup-btn-group-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #78350f;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+
+    .mockup-btn {
+      font-size: 13px;
+      padding: 6px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      color: #374151;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mockup-btn:hover {
+      background: #f3f4f6;
+    }
+
+    .mockup-btn.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+
+    /* ===== Main Container ===== */
+    .main {
+      max-width: 720px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 32px 24px;
+      flex: 1;
+      padding-bottom: 200px; /* 下部固定エリア分の余白 */
+    }
+
+    /* ===== Section shared ===== */
+    .section {
+      background: #fff;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #6b7280;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* ===== Answer Area (回答 + 出典一体表示) ===== */
+    .answer-area {
+      display: none;
+    }
+
+    .answer-area.visible {
+      display: block;
+    }
+
+    .answer-text {
+      font-size: 16px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .status-label {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 4px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .status-label.ai_answer     { background: #dbeafe; color: #1e40af; }
+    .status-label.direct_faq    { background: #e0e7ff; color: #3730a3; }
+    .status-label.no_match      { background: #fef3c7; color: #92400e; }
+    .status-label.ai_unavailable { background: #fee2e2; color: #991b1b; }
+    .status-label.server_error  { background: #fee2e2; color: #991b1b; }
+
+    /* ===== Source FAQ Area (回答エリア内に出典を表示) ===== */
+    .source-area {
+      display: none;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .source-area.visible {
+      display: block;
+    }
+
+    .source-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .source-table th {
+      background: #f9fafb;
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 2px solid #e5e7eb;
+      font-weight: 600;
+      color: #374151;
+      white-space: nowrap;
+    }
+
+    .source-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+      color: #1a1a1a;
+    }
+
+    .source-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .confidence-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #ecfdf5;
+      color: #065f46;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* ===== No Source / Guidance (回答エリア内) ===== */
+    .no-source-area {
+      display: none;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .no-source-area.visible {
+      display: block;
+    }
+
+    .no-source-msg {
+      font-size: 16px;
+      color: #92400e;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .guidance-msg {
+      font-size: 16px;
+      line-height: 1.7;
+      color: #374151;
+      background: #fffbeb;
+      padding: 16px 24px;
+      border-radius: 8px;
+      border: 1px solid #fde68a;
+    }
+
+    /* ===== Loading ===== */
+    .loading-area {
+      display: none;
+    }
+
+    .loading-area.visible {
+      display: block;
+    }
+
+    .loading-indicator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 24px;
+      color: #4b5563;
+      font-size: 16px;
+    }
+
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid #e5e7eb;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ===== Question Input Area (画面下部固定) ===== */
+    .question-fixed {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #fff;
+      border-top: 1px solid #e5e7eb;
+      box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.06);
+      z-index: 100;
+    }
+
+    .question-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 16px 24px;
+    }
+
+    .question-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+
+    .question-textarea {
+      flex: 1;
+      min-height: 56px;
+      max-height: 120px;
+      padding: 12px 16px;
+      font-family: inherit;
+      font-size: 16px;
+      line-height: 1.7;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      resize: vertical;
+      color: #1a1a1a;
+      background: #fff;
+      transition: border-color 0.15s;
+    }
+
+    .question-textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .question-textarea:disabled {
+      background: #f9fafb;
+      color: #9ca3af;
+    }
+
+    .submit-btn {
+      padding: 12px 28px;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      background: #2563eb;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .submit-btn:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+
+    .question-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .char-counter {
+      font-size: 13px;
+      color: #9ca3af;
+    }
+
+    .char-counter.over-limit {
+      color: #dc2626;
+      font-weight: 600;
+    }
+
+    /* ===== Error Message (フォームのすぐ下) ===== */
+    .error-area {
+      display: none;
+    }
+
+    .error-area.visible {
+      display: block;
+    }
+
+    .error-msg {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: #991b1b;
+      font-size: 14px;
+      line-height: 1.7;
+      margin-top: 8px;
+    }
+
+    /* ===== Navigation Link ===== */
+    .nav-link {
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .nav-link a {
+      color: #2563eb;
+      text-decoration: none;
+      font-size: 16px;
+    }
+
+    .nav-link a:hover {
+      text-decoration: underline;
+    }
+
+    /* ===== Utility ===== */
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== ヘッダー（WebLayout mock） ===== -->
+  <header class="header">
+    <div class="header-title">
+      <span>Helpo</span>
+      <span style="font-weight: 400; font-size: 14px; opacity: 0.8;">AI社内ヘルプデスク</span>
+    </div>
+  </header>
+
+  <!-- ===== モックアップ状態切替コントロール ===== -->
+  <div class="mockup-controls">
+    <div class="mockup-controls-title">モックアップ状態切替</div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">基本状態</div>
+      <button class="mockup-btn active" onclick="setState('empty')">空っぽ（初期状態）</button>
+      <button class="mockup-btn" onclick="setState('loading')">処理中</button>
+    </div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">回答パターン（persisted status）</div>
+      <button class="mockup-btn" onclick="setState('ai_answer')">AI回答（ai_answer）</button>
+      <button class="mockup-btn" onclick="setState('direct_faq')">FAQ直接回答（direct_faq）</button>
+      <button class="mockup-btn" onclick="setState('no_match')">該当FAQなし（no_match）</button>
+      <button class="mockup-btn" onclick="setState('ai_unavailable')">AI利用不可（ai_unavailable）</button>
+      <button class="mockup-btn" onclick="setState('server_error')">サーバエラー（server_error）</button>
+    </div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">バリデーションエラー（非保存）</div>
+      <button class="mockup-btn" onclick="setState('error_empty')">空入力エラー</button>
+      <button class="mockup-btn" onclick="setState('error_over')">文字数超過エラー</button>
+    </div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">通信エラー</div>
+      <button class="mockup-btn" onclick="setState('error_500')">システムエラー（500）</button>
+    </div>
+  </div>
+
+  <!-- ===== メインコンテンツ ===== -->
+  <main class="main">
+
+    <!-- 読み込み中 -->
+    <div id="loading-area" class="loading-area section">
+      <div class="loading-indicator">
+        <div class="loading-spinner"></div>
+        <span>処理中...</span>
+      </div>
+    </div>
+
+    <!-- 回答表示エリア（回答 + 出典を一体表示） -->
+    <div id="answer-area" class="answer-area section">
+      <div>
+        <span id="status-label" class="status-label"></span>
+      </div>
+      <div id="answer-text" class="answer-text"></div>
+
+      <!-- 出典FAQ一覧（回答エリア内） -->
+      <div id="source-area" class="source-area">
+        <div class="section-title">出典FAQ</div>
+        <table class="source-table">
+          <thead>
+            <tr>
+              <th>FAQ ID</th>
+              <th>質問文</th>
+              <th>回答文</th>
+              <th>類似度</th>
+            </tr>
+          </thead>
+          <tbody id="source-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- 出典なし + 窓口案内（回答エリア内） -->
+      <div id="no-source-area" class="no-source-area">
+        <div class="no-source-msg">出典が見つかりません</div>
+        <div id="guidance-msg" class="guidance-msg"></div>
+      </div>
+    </div>
+
+    <!-- 履歴一覧リンク -->
+    <div class="nav-link">
+      <a href="/chat/history">履歴一覧</a>
+    </div>
+
+  </main>
+
+  <!-- ===== 質問入力エリア（画面下部固定） ===== -->
+  <div class="question-fixed">
+    <div class="question-inner">
+      <div class="question-row">
+        <textarea
+          id="question"
+          class="question-textarea"
+          placeholder="質問を入力してください..."
+          rows="1"
+        ></textarea>
+        <button id="submit-btn" class="submit-btn" onclick="handleSubmit()">送信</button>
+      </div>
+      <div class="question-meta">
+        <div id="char-count" class="char-counter">0 / 400</div>
+      </div>
+      <!-- エラーメッセージ（フォームのすぐ下） -->
+      <div id="error-area" class="error-area">
+        <div id="error-msg" class="error-msg"></div>
+      </div>
+    </div>
+
+    <!-- hidden: request_id -->
+    <input type="hidden" id="request-id" />
+  </div>
+
+  <script>
+    // ===== ダミーデータ =====
+
+    var CONTACT_GUIDANCE = 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。';
+
+    var STATUS_LABELS = {
+      ai_answer: 'AI回答',
+      direct_faq: 'FAQ直接回答',
+      no_match: '該当FAQなし',
+      ai_unavailable: 'AI利用不可',
+      server_error: 'サーバエラー'
+    };
+
+    function getDummyResponse(status) {
+      switch (status) {
+        case 'ai_answer':
+          return {
+            history_id: 1,
+            request_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            question: '有給休暇の申請方法を教えてください',
+            answer: '有給休暇の申請は、社内ポータルの「勤怠管理」メニューから行えます。「休暇申請」ボタンをクリックし、希望日と理由を入力して申請してください。申請は希望日の3営業日前までに提出が必要です。上長の承認後、申請完了の通知メールが届きます。',
+            status: 'ai_answer',
+            created_at: '2026-08-27T10:30:00Z',
+            sources: [
+              {
+                faq_id_at_answer: 12,
+                current_faq_id: 12,
+                question: '有給休暇はどのように申請しますか？',
+                answer: '社内ポータルの「勤怠管理」→「休暇申請」から申請できます。希望日の3営業日前までに申請してください。',
+                confidence: 0.92,
+                is_deleted: false
+              },
+              {
+                faq_id_at_answer: 15,
+                current_faq_id: 15,
+                question: '休暇申請の承認フローを教えてください',
+                answer: '休暇申請は直属の上長が承認します。承認後、申請者と人事部に通知メールが送信されます。',
+                confidence: 0.78,
+                is_deleted: false
+              }
+            ]
+          };
+
+        case 'direct_faq':
+          return {
+            history_id: 2,
+            request_id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
+            question: '経費精算の締め日はいつですか',
+            answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
+            status: 'direct_faq',
+            created_at: '2026-08-27T11:00:00Z',
+            sources: [
+              {
+                faq_id_at_answer: 8,
+                current_faq_id: 8,
+                question: '経費精算の締め日と振込日を教えてください',
+                answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
+                confidence: 0.95,
+                is_deleted: false
+              }
+            ]
+          };
+
+        case 'no_match':
+          return {
+            history_id: 3,
+            request_id: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
+            question: '近くのおすすめのランチスポットを教えて',
+            answer: CONTACT_GUIDANCE,
+            status: 'no_match',
+            created_at: '2026-08-27T11:30:00Z',
+            sources: []
+          };
+
+        case 'ai_unavailable':
+          return {
+            history_id: 4,
+            request_id: 'd4e5f6a7-b8c9-0123-defa-234567890123',
+            question: '健康診断の予約方法を教えてください',
+            answer: CONTACT_GUIDANCE,
+            status: 'ai_unavailable',
+            created_at: '2026-08-27T12:00:00Z',
+            sources: []
+          };
+
+        case 'server_error':
+          return {
+            history_id: 5,
+            request_id: 'e5f6a7b8-c9d0-1234-efab-345678901234',
+            question: '出張申請の手順を教えてください',
+            answer: CONTACT_GUIDANCE,
+            status: 'server_error',
+            created_at: '2026-08-27T12:30:00Z',
+            sources: []
+          };
+
+        default:
+          return null;
+      }
+    }
+
+
+    // ===== DOM要素参照 =====
+    var elErrorArea    = document.getElementById('error-area');
+    var elErrorMsg     = document.getElementById('error-msg');
+    var elLoadingArea  = document.getElementById('loading-area');
+    var elAnswerArea   = document.getElementById('answer-area');
+    var elAnswerText   = document.getElementById('answer-text');
+    var elStatusLabel  = document.getElementById('status-label');
+    var elSourceArea   = document.getElementById('source-area');
+    var elSourceTbody  = document.getElementById('source-tbody');
+    var elNoSourceArea = document.getElementById('no-source-area');
+    var elGuidanceMsg  = document.getElementById('guidance-msg');
+    var elQuestion     = document.getElementById('question');
+    var elCharCount    = document.getElementById('char-count');
+    var elSubmitBtn    = document.getElementById('submit-btn');
+    var elRequestId    = document.getElementById('request-id');
+
+    // ===== 文字数カウンター =====
+    elQuestion.addEventListener('input', function () {
+      var len = elQuestion.value.length;
+      elCharCount.textContent = len + ' / 400';
+      if (len > 400) {
+        elCharCount.classList.add('over-limit');
+      } else {
+        elCharCount.classList.remove('over-limit');
+      }
+    });
+
+    // ===== UUID生成 =====
+    function generateUUID() {
+      if (crypto && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = (Math.random() * 16) | 0;
+        var v = c === 'x' ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    }
+
+    elRequestId.value = generateUUID();
+
+    // ===== HTMLエスケープ =====
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.appendChild(document.createTextNode(str));
+      return div.innerHTML;
+    }
+
+    // ===== 全エリアリセット =====
+    function resetAll() {
+      elErrorArea.classList.remove('visible');
+      elLoadingArea.classList.remove('visible');
+      elAnswerArea.classList.remove('visible');
+      elSourceArea.classList.remove('visible');
+      elNoSourceArea.classList.remove('visible');
+      elErrorMsg.textContent = '';
+      elAnswerText.textContent = '';
+      elStatusLabel.textContent = '';
+      elStatusLabel.className = 'status-label';
+      elSourceTbody.innerHTML = '';
+      elGuidanceMsg.textContent = '';
+      elSubmitBtn.disabled = false;
+      elQuestion.disabled = false;
+    }
+
+    // ===== 回答表示 =====
+    function showAnswer(response) {
+      elStatusLabel.textContent = STATUS_LABELS[response.status] || response.status;
+      elStatusLabel.className = 'status-label ' + response.status;
+      elAnswerText.textContent = response.answer;
+      elAnswerArea.classList.add('visible');
+    }
+
+    // ===== 出典FAQ表示（回答エリア内） =====
+    function showSources(sources) {
+      elSourceTbody.innerHTML = '';
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
+        var tr = document.createElement('tr');
+
+        var tdId = document.createElement('td');
+        tdId.textContent = s.faq_id_at_answer;
+        tr.appendChild(tdId);
+
+        var tdQ = document.createElement('td');
+        tdQ.textContent = s.question;
+        tr.appendChild(tdQ);
+
+        var tdA = document.createElement('td');
+        tdA.textContent = s.answer;
+        tr.appendChild(tdA);
+
+        var tdC = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'confidence-badge';
+        badge.textContent = s.confidence.toFixed(2);
+        tdC.appendChild(badge);
+        if (s.is_deleted) {
+          var del = document.createElement('span');
+          del.style.cssText = 'display:block;color:#dc2626;font-size:13px;margin-top:4px;';
+          del.textContent = '（削除済み）';
+          tdC.appendChild(del);
+        }
+        tr.appendChild(tdC);
+
+        elSourceTbody.appendChild(tr);
+      }
+      elSourceArea.classList.add('visible');
+    }
+
+    // ===== 窓口案内表示（回答エリア内） =====
+    function showGuidance() {
+      elGuidanceMsg.textContent = CONTACT_GUIDANCE;
+      elNoSourceArea.classList.add('visible');
+    }
+
+    // ===== 状態切替メイン =====
+    function setState(state) {
+      resetAll();
+
+      // ボタンのactive状態更新
+      var btns = document.querySelectorAll('.mockup-btn');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+      }
+      var clickedBtn = event && event.target;
+      if (clickedBtn && clickedBtn.classList.contains('mockup-btn')) {
+        clickedBtn.classList.add('active');
+      }
+
+      switch (state) {
+        case 'empty':
+          // 初期状態: 何も表示しない
+          elQuestion.value = '';
+          elCharCount.textContent = '0 / 400';
+          elCharCount.classList.remove('over-limit');
+          break;
+
+        case 'loading':
+          elQuestion.value = '有給休暇の申請方法を教えてください';
+          elCharCount.textContent = elQuestion.value.length + ' / 400';
+          elSubmitBtn.disabled = true;
+          elQuestion.disabled = true;
+          elLoadingArea.classList.add('visible');
+          break;
+
+        case 'ai_answer':
+        case 'direct_faq': {
+          var resp = getDummyResponse(state);
+          elQuestion.value = resp.question;
+          elCharCount.textContent = resp.question.length + ' / 400';
+          showAnswer(resp);
+          if (resp.sources.length > 0) {
+            showSources(resp.sources);
+          }
+          break;
+        }
+
+        case 'no_match':
+        case 'ai_unavailable': {
+          var resp2 = getDummyResponse(state);
+          elQuestion.value = resp2.question;
+          elCharCount.textContent = resp2.question.length + ' / 400';
+          showAnswer(resp2);
+          showGuidance();
+          break;
+        }
+
+        case 'server_error': {
+          var resp3 = getDummyResponse(state);
+          elQuestion.value = resp3.question;
+          elCharCount.textContent = resp3.question.length + ' / 400';
+          showAnswer(resp3);
+          showGuidance();
+          break;
+        }
+
+        case 'error_empty':
+          elQuestion.value = '';
+          elCharCount.textContent = '0 / 400';
+          elErrorMsg.textContent = '質問を入力してください';
+          elErrorArea.classList.add('visible');
+          break;
+
+        case 'error_over':
+          elQuestion.value = 'あ'.repeat(401);
+          elCharCount.textContent = '401 / 400';
+          elCharCount.classList.add('over-limit');
+          elErrorMsg.textContent = '質問は400文字以内で入力してください';
+          elErrorArea.classList.add('visible');
+          break;
+
+        case 'error_500':
+          elQuestion.value = '何か質問を入力した状態';
+          elCharCount.textContent = elQuestion.value.length + ' / 400';
+          elErrorMsg.textContent = 'システムエラーが発生しました。しばらく時間をおいてから再度お試しください。';
+          elErrorArea.classList.add('visible');
+          break;
+      }
+    }
+
+    // ===== 送信ハンドラ（モックアップ用） =====
+    function handleSubmit() {
+      resetAll();
+
+      var q = elQuestion.value.trim();
+
+      // V1: 空入力チェック
+      if (q.length === 0) {
+        elErrorMsg.textContent = '質問を入力してください';
+        elErrorArea.classList.add('visible');
+        return;
+      }
+
+      // V2: 文字数超過チェック
+      if (q.length > 400) {
+        elErrorMsg.textContent = '質問は400文字以内で入力してください';
+        elErrorArea.classList.add('visible');
+        return;
+      }
+
+      // 処理中を表示 → 1.5秒後にダミー回答を表示
+      elSubmitBtn.disabled = true;
+      elQuestion.disabled = true;
+      elLoadingArea.classList.add('visible');
+
+      setTimeout(function () {
+        resetAll();
+        var resp = getDummyResponse('ai_answer');
+        resp.question = q;
+        elQuestion.value = q;
+        elCharCount.textContent = q.length + ' / 400';
+        showAnswer(resp);
+        showSources(resp.sources);
+        elRequestId.value = generateUUID();
+      }, 1500);
+    }
+
+    // ===== 初期状態 =====
+    setState('empty');
+  </script>
+
+</body>
+</html>
