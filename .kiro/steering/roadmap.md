@@ -31,3 +31,4 @@ PythonとFastAPIを中心とした一体型構成を採用し、WindowsのGPUな
 - [x] local-user-authentication -- ローカルユーザーのログインと管理者・一般利用者ロールを提供する。Dependencies: helpo-foundation
 - [x] faq-management-and-search -- FAQ管理、Embedding生成、類似検索、適合判定を提供する。Dependencies: helpo-foundation, local-user-authentication
 - [x] ai-helpdesk-chat -- FAQを根拠にしたAIチャット、根拠表示、回答不能時の案内、本人の質問・回答履歴を提供する。Dependencies: helpo-foundation, local-user-authentication, faq-management-and-search
+- [ ] header-navigation-menu -- 全画面共通のヘッダーメニュー（サービスタイトル、質問・履歴・FAQ管理画面へのリンクとその活性/非活性制御、ログイン中の利用者名・ロール表示、ログアウトボタン）を提供する。Dependencies: helpo-foundation, local-user-authentication, ai-helpdesk-chat, faq-management-and-search
