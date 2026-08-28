@@ -7,13 +7,17 @@
   <div class="login-card">
     <h2 class="login-title">ログイン</h2>
 
-    {% if error == "invalid_credentials" %}
-    <div class="alert alert-error">
-      ユーザー名またはパスワードが正しくありません。
-    </div>
-    {% elif error == "too_many_attempts" %}
-    <div class="alert alert-error">
-      ログイン試行回数が上限を超えたため、しばらくの間ログインできません。時間をおいて再度お試しください。
+    {% if error %}
+    <div class="error-area">
+      <div class="error-msg">
+        {% if error == "invalid_credentials" %}
+        ユーザー名またはパスワードが正しくありません。
+        {% elif error == "too_many_attempts" %}
+        ログイン試行回数が上限を超えたため、しばらくの間ログインできません。時間をおいて再度お試しください。
+        {% else %}
+        システムエラーが発生しました。しばらくしてから再度お試しください。
+        {% endif %}
+      </div>
     </div>
     {% endif %}
 
