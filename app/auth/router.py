@@ -73,7 +73,9 @@ async def login_page(
         return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     ctx = NavLinkPolicy().build(current)
     return templates.TemplateResponse(
-        request, "auth/login.html", {"error": None, "header_menu_context": ctx}
+        request,
+        "auth/login.html",
+        {"error": None, "header_menu_context": ctx, "hide_login_link": True},
     )
 
 
@@ -99,7 +101,11 @@ async def login_submit(
         html = templates.TemplateResponse(
             request,
             "auth/login.html",
-            {"error": "too_many_attempts", "header_menu_context": _nav_ctx},
+            {
+                "error": "too_many_attempts",
+                "header_menu_context": _nav_ctx,
+                "hide_login_link": True,
+            },
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         )
         html.set_cookie(
@@ -121,7 +127,11 @@ async def login_submit(
         html = templates.TemplateResponse(
             request,
             "auth/login.html",
-            {"error": "invalid_credentials", "header_menu_context": _nav_ctx},
+            {
+                "error": "invalid_credentials",
+                "header_menu_context": _nav_ctx,
+                "hide_login_link": True,
+            },
             status_code=status.HTTP_400_BAD_REQUEST,
         )
         html.set_cookie(

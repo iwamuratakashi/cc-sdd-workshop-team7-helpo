@@ -20,7 +20,7 @@
       <form method="post" action="/logout" style="margin:0;">
         <button type="submit" class="hnm-logout">ログアウト</button>
       </form>
-    {% else %}
+    {% elif not hide_login_link %}
       <a class="hnm-login" href="/login">ログイン</a>
     {% endif %}
   </div>
