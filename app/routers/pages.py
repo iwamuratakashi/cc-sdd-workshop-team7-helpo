@@ -43,11 +43,4 @@ def chat_placeholder(
     )
 
 
-@router.get("/faqs/upload")
-def faq_upload_placeholder(
-    request: Request,
-    current: CurrentUser | None = Depends(get_current_user_optional),
-):
-    return templates.TemplateResponse(
-        request, "placeholder.html", {"page_title": "FAQ管理", **_nav_ctx(current)}
-    )
+# /faqs/upload は app/faq/router.py で実装（require_admin 付き）

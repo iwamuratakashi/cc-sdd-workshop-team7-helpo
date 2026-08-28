@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -7,6 +8,11 @@ from app.db import DatabaseEngine
 from app.logging_conf import configure_logging, log_exception
 from app.router_registry import router_registry, include_registered_routers
 from app.routers.pages import router as pages_router
+from app.faq.router import router as faq_router
+from app.faq.router import router as faq_router
+from app.faq.dependencies import get_faq_search_index
+
+logger = logging.getLogger(__name__)
 
 # 下位機能ルーターを共有レジストリへ登録（import 順に登録される）
 import app.auth  # noqa: F401  — AuthRouter を router_registry へ登録
@@ -45,6 +51,7 @@ def create_app() -> FastAPI:
     for r, prefix, tags in router_registry._routers:
         local_registry.register_router(r, prefix, tags)
     local_registry.register_router(pages_router)
+    local_registry.register_router(faq_router, tags=["FAQ"])
     include_registered_routers(app, local_registry)
     return app
 

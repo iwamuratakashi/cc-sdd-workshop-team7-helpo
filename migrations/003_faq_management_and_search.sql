@@ -1,0 +1,20 @@
+-- FAQ管理・検索: faq テーブルと faq_embedding テーブルを追加する
+CREATE TABLE faq (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE faq_embedding (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    faq_id INTEGER NOT NULL UNIQUE,
+    dimension INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (faq_id) REFERENCES faq(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_faq_embedding_faq_id ON faq_embedding(faq_id)

@@ -111,9 +111,46 @@
 - **Embedding モデル未確定** — アダプター層で抽象化し、モデル未設定時は明確な 503 エラーで対応。
 - **誤登録の訂正手段がない** — ファイルを修正して再アップロードする運用でカバー。運用で問題になれば削除機能を追加検討。
 - **大容量ファイルのメモリ消費** — `UploadFile` を使い、10MB 上限を設ける。
+- **評価の重複（同一ユーザーの複数回送信）** — Req 7 には重複制限の要件がないため、1 ユーザーが複数回評価することを許容する。将来的に重複制限が必要になった場合は `(faq_id, user_id)` への UNIQUE 制約追加で対応可能。
+- **FAQ 削除時の評価データ整合性** — `faq_rating.faq_id` に CASCADE DELETE を設定し、FAQ 削除と同時に関連評価も削除する。
 
 ## References
 
 - FastAPI UploadFile: https://fastapi.tiangolo.com/tutorial/request-files/
 - Python-Markdown: https://python-markdown.github.io/
 - mistletoe: https://github.com/miyuchina/mistletoe
+
+---
+
+## 2026-08-28 更新分：Req6（FAQ一覧）・Req7（役立ち度評価）追加対応
+
+### Topic: 評価集計クエリの設計
+
+- **Context**: 管理者向け FAQ 一覧に各 FAQ の「役立った/役立たなかった」件数を集計して表示するため、効率的な集計クエリが必要。
+- **Findings**:
+  - SQLAlchemy の `func.count` + `case` 式 + `group_by(FaqRating.faq_id)` で条件付き集計が可能。
+  - 全 FAQ の集計を 1 クエリで取得する `aggregate_all` を `FaqRatingRepository` に定義し、Python 側で FAQ リストに結合する。
+  - FAQ 件数と評価件数が研修 MVP 規模（数十〜数百件）であれば、`aggregate_all` の全件取得は十分な性能を発揮する。
+- **Implications**:
+  - `FaqRatingRepository.aggregate_all(db) -> dict[int, tuple[int, int]]` として集計結果を辞書で返す。
+  - `FaqRatingService.list_faqs_with_ratings` が FAQ リストと辞書を Python 側でマージして `FaqWithRating` リストを構築する。
+  - `faq_id` カラムへのインデックスが集計パフォーマンスを保証する。
+
+### Topic: 評価 API の境界設計
+
+- **Context**: 評価送信 UI は `ai-helpdesk-chat` が担うが、評価の保存 API は `faq-management-and-search` が担う。境界の明確化が必要。
+- **Findings**:
+  - `POST /api/faqs/{faq_id}/ratings` に `is_helpful: bool` を受け取る API を定義する。
+  - faq_id の存在確認（`FaqRepository.get_by_id`）を `FaqRatingService.submit` 内で行い、不存在時は `ValueError` → HTTP 404 として返す。
+  - これにより、「FAQが根拠として使われなかった回答への評価を受け付けない」（Req 7.4）のサーバー側ガードを実現する。
+  - クライアント（ai-helpdesk-chat）側の責任：評価 UI を FAQが根拠として使われた回答にのみ表示し、`faq_id` を正しく渡す。
+- **Implications**:
+  - `faq-management-and-search` は API 提供と保存のみ担当。
+  - `ai-helpdesk-chat` は評価 UI の表示タイミングと `faq_id` の選択を担当。
+  - この境界により、両スペックが独立して実装・テスト可能になる。
+
+### Synthesis Outcomes
+
+- **FaqRatingSummary / FaqWithRating**: 一覧 API 専用の読み取り専用 DTO として新設。`FaqRatingService` が生成し、スキーマ層（Pydantic）に変換してから返す。
+- **重複制限なし**: Req 7 に重複制限の記述がないため、同一ユーザーの複数回評価を許容する設計とする。将来の拡張ポイントとして `research.md` に記録する。
+- **一覧は管理者のみ**: Req 6 の要件どおり、`GET /api/faqs` と `GET /faqs` は `require_admin` を適用する。一般ユーザーからのアクセスは 403 で拒否する。

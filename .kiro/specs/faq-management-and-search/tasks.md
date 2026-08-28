@@ -129,3 +129,74 @@
   - _Requirements: 5.1, 5.2_
   - _Boundary: FaqTestSuite_
   - _Depends: 5.2_
+
+- [ ] 6. 役立ち度評価機能の基盤を追加する
+- [ ] 6.1 faq_rating テーブルのマイグレーションを追加する
+  - `migrations/004_faq_rating.sql` を新規作成し、`faq_rating` テーブルを定義する。
+  - カラム: `id`（PK/autoincrement）、`faq_id`（FK → faq.id ON DELETE CASCADE, NOT NULL）、`user_id`（NOT NULL）、`is_helpful`（INTEGER NOT NULL, CHECK IN (0,1)）、`created_at`、`updated_at`。
+  - `faq_id` と `user_id` に個別インデックスを追加し、集計クエリとユーザー別フィルタの性能を確保する。
+  - foundation の MigrationRunner を通じて `003_faq_management_and_search.sql` の後に適用する。
+  - 完了状態: 空DBおよび既存スキーマ適用済みDBで `004_faq_rating.sql` が成功し、`faq_rating` テーブルと両インデックスが存在する。
+  - _Requirements: 7.2_
+  - _Boundary: FaqRatingMigration_
+  - _Depends: 1.1_
+
+- [ ] 6.2 FaqRatingエンティティとリポジトリを実装する
+  - `FaqRating` ORM エンティティを `models.py` に追加する（`BaseEntity` 継承、`faq_id` FK、`user_id`、`is_helpful` Boolean）。
+  - `FaqRatingRepository` を `repositories.py` に追加し、`create(db, faq_id, user_id, is_helpful)` でレコードを永続化する。
+  - `aggregate_all(db) -> dict[int, tuple[int, int]]` を実装し、`GROUP BY faq_id` + 条件付き COUNT で全FAQの（helpful件数, not_helpful件数）を一度のクエリで返す。
+  - トランザクション境界は呼び出し元に委ね、リポジトリ内で `commit()` しない。
+  - 完了状態: テスト用DBで `FaqRating` の作成・`aggregate_all` の集計結果が正しく動作し、FAQ削除時の CASCADE DELETE が確認できる。
+  - _Requirements: 7.2, 6.2, 6.3_
+  - _Boundary: FaqRatingRepository_
+  - _Depends: 6.1_
+
+- [ ] 7. 評価サービスとAPIスキーマを実装する
+- [ ] 7.1 (P) FaqRatingServiceを実装する
+  - `services.py` に `FaqRatingSummary`（`helpful_count, not_helpful_count`）と `FaqWithRating` データクラスを追加する。
+  - `FaqRatingService` を実装し、`submit(db, user_id, faq_id, is_helpful)` と `list_faqs_with_ratings(db)` を提供する。
+  - `submit` は `FaqRepository.get_by_id` で FAQ の存在を確認し、存在しない場合は `ValueError` を送出する（ルーターが HTTP 404 にマップ）。存在する場合は `FaqRatingRepository.create` で保存して `FaqRating` を返す。
+  - `list_faqs_with_ratings` は `FaqRepository.list_all()` と `FaqRatingRepository.aggregate_all()` を Python 側でマージし、評価がないFAQには `helpful_count=0, not_helpful_count=0` を設定する。FAQ が 0 件のときは空リストを返す。
+  - 完了状態: 単体テストで FAQ 存在時の評価保存・FAQ 未存在時の `ValueError` 送出・FAQ一覧への評価集計マージが確認できる。
+  - _Requirements: 7.1, 7.2, 7.4, 6.1, 6.2, 6.3, 6.4_
+  - _Boundary: FaqRatingService_
+  - _Depends: 6.2_
+
+- [ ] 7.2 (P) 評価関連Pydanticスキーマを追加する
+  - `schemas.py` に `FaqRatingCreate`（`is_helpful: bool`）と `FaqRatingRead`（`id, faq_id, user_id, is_helpful, created_at`）を追加する。
+  - `FaqRatingSummarySchema`（`helpful_count: int, not_helpful_count: int`）と `FaqWithRatingSchema`（`id, question, answer, created_at, updated_at, rating_summary: FaqRatingSummarySchema`）を追加する。
+  - `model_config = ConfigDict(from_attributes=True)` を各スキーマに設定し、ORM オブジェクトから変換できるようにする。
+  - 完了状態: 各スキーマが正しく型検証され、`FaqRatingCreate.model_validate({'is_helpful': True})` が正常動作する。
+  - _Requirements: 7.1, 6.1, 6.2_
+  - _Boundary: Schemas_
+  - _Depends: 6.2_
+
+- [ ] 8. 評価API・FAQ一覧APIと管理画面を実装する
+- [ ] 8.1 役立ち度評価APIを実装する
+  - `dependencies.py` に `get_faq_rating_service()` を追加し、`FaqRatingService` のインスタンスを返す。
+  - `router.py` に `POST /api/faqs/{faq_id}/ratings` を追加し、`require_authenticated_user` を適用する。
+  - `FaqRatingService.submit` を呼び出し、`ValueError`（FAQ未存在）は HTTP 404 にマップする。未認証は 401 を返す。
+  - レスポンスは `FaqRatingRead` スキーマ（status 201）。
+  - 完了状態: 認証済みユーザーが有効な `faq_id` に評価を送信すると 201 が返り `faq_rating` テーブルにレコードが作成される。存在しない `faq_id` は 404、未認証は 401。
+  - _Requirements: 7.1, 7.2, 7.3, 7.4_
+  - _Boundary: FaqRouter, FaqRatingService_
+  - _Depends: 7.1, 7.2_
+
+- [ ] 8.2 管理者向けFAQ一覧APIと一覧画面を実装する
+  - `router.py` に `GET /api/faqs` を追加し、`require_admin` を適用する。`FaqRatingService.list_faqs_with_ratings` を呼び出し `list[FaqWithRatingSchema]` を返す。未認証は 401、非管理者は 403。
+  - `router.py` に `GET /faqs` を追加し、`require_admin` を適用する。`templates/faq/list.html` に FAQ一覧と評価集計を渡して返す。
+  - `app/templates/faq/list.html` を新規作成する（`base.html` 継承、FAQ一覧テーブル、「役立った/役立たなかった」件数列、FAQ 0件時のメッセージ）。
+  - 完了状態: 管理者で `GET /faqs` にアクセスすると全FAQと評価件数が一覧表示され、未認証は 401・一般ユーザーは 403 で拒否される。
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
+  - _Boundary: FaqRouter, FaqListUI_
+  - _Depends: 8.1_
+
+- [ ] 9. 評価・一覧機能の結合テストを追加する
+  - `tests/test_faq.py` に評価API・一覧API の結合テストを追加する。
+  - 評価API（`POST /api/faqs/{faq_id}/ratings`）: 認証済みユーザーが有効な `faq_id` に評価を送信して 201、存在しない `faq_id` で 404、未認証で 401 を確認する。
+  - 一覧API（`GET /api/faqs`）: 管理者で全FAQ＋評価集計を取得(200)、評価なしFAQの 0/0 表示、FAQ 0件時の空リスト、一般ユーザーで 403、未認証で 401 を確認する。
+  - Web UI（`GET /faqs`）: 管理者でFAQ一覧画面が表示され、未認証/一般ユーザーが拒否されることを確認する。
+  - 完了状態: `pytest` で評価・一覧関連テストがすべて合格する。
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4_
+  - _Boundary: FaqTestSuite_
+  - _Depends: 8.2_

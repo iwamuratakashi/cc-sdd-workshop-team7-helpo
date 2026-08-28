@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}FAQ管理 - HELPO{% endblock %}
+
+{% block content %}
+<h1>FAQ アップロード</h1>
+<p>Markdown ファイルをアップロードして FAQ を登録します。</p>
+<ul>
+  <li>ファイル形式: <code>.md</code>（Markdown）</li>
+  <li>最大サイズ: 10MB</li>
+  <li>構文: <code>## 質問文</code> に続く段落を回答文として登録します</li>
+</ul>
+
+{% if error %}
+<div class="error-message" role="alert">
+  <strong>エラー:</strong> {{ error }}
+</div>
+{% endif %}
+
+{% if success %}
+<div class="success-message" role="status">
+  {{ success }} 件の FAQ を登録しました。
+</div>
+{% endif %}
+
+<form method="post" enctype="multipart/form-data" action="/faqs/upload">
+  <div>
+    <label for="file">Markdown ファイルを選択:</label>
+    <input type="file" id="file" name="file" accept=".md,text/markdown" required>
+  </div>
+  <button type="submit">アップロード</button>
+</form>
+{% endblock %}
