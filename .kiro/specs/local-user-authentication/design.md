@@ -363,6 +363,8 @@ def require_owner(current: CurrentUser, owner_user_id: int) -> None: ...
 ### AuthWebUI
 
 - `login.html`はfoundation `base.html`を継承し、ユーザー名・パスワード入力と共通認証失敗だけを表示する。
+- ユーザー名・パスワード入力欄にプレースホルダーテキストは設定しない（空欄のまま表示する）。
+- 研修用初期利用者（`user01`・`admin01`）の資格情報を画面上に案内・表示しない。
 - `base.html`の既存ブロックを削除・改名せず、`app/templates/auth/_nav.html` で `nav_extra` 等の拡張ブロックを上書きし、`current_user`の有無に応じたナビゲーションを追加する。
 - `current_user`は`CurrentUser | None`だけで、ORM UserやSessionをテンプレートへ渡さない。
 
