@@ -95,8 +95,8 @@ def test_base_repository_crud(db_session):
 def test_root_page():
     DatabaseEngine.reset()
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-    client = TestClient(create_app())
-    response = client.get("/")
+    with TestClient(create_app()) as client:
+        response = client.get("/")
     assert response.status_code == 200
     assert "HELPO" in response.text
 

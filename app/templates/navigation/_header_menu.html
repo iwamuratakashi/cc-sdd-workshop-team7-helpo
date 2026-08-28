@@ -1,0 +1,28 @@
+{% if header_menu_context is defined %}
+{% set ctx = header_menu_context %}
+<div class="hnm-inner">
+  <span class="hnm-title" role="presentation">HELPO</span>
+  <nav class="hnm-links" aria-label="メインナビゲーション">
+    {% for link in ctx.links %}
+      {% if link.active %}
+        <a class="hnm-link" href="{{ link.href }}">{{ link.label }}</a>
+      {% else %}
+        <span class="hnm-link hnm-link-inactive" aria-disabled="true">{{ link.label }}</span>
+      {% endif %}
+    {% endfor %}
+  </nav>
+  <div class="hnm-account">
+    {% if ctx.show_user_info %}
+      {% set role_label = "管理者" if ctx.role == "admin" else "一般利用者" %}
+      <span class="hnm-user">{{ ctx.username }}（{{ role_label }}）</span>
+    {% endif %}
+    {% if ctx.show_logout %}
+      <form method="post" action="/logout" style="margin:0;">
+        <button type="submit" class="hnm-logout">ログアウト</button>
+      </form>
+    {% else %}
+      <a class="hnm-login" href="/login">ログイン</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

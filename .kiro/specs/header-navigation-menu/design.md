@@ -57,9 +57,16 @@ header-navigation-menuは、helpo-foundationが提供する`base.html`の拡張�
 
 ### Existing Architecture Analysis
 
-- helpo-foundationの単体FastAPI monolith、Jinja2テンプレート構成をそのまま利用する。
-- 現時点で`app/`配下の実コードは未実装（`mockup/`の静的HTMLのみ存在）であり、本設計は各仕様の`design.md`で定義済みの契約（`base.html`の拡張ブロック、`CurrentUser`型）を正典として組み立てる。
-- 各画面テンプレート（`login.html`、`chat.html`、`history.html`、`detail.html`、`upload.html`）は個別に`base.html`を継承する設計であり、そのままでは`nav_extra`ブロックの上書きが画面ごとに重複する。本設計は中間テンプレート`_page_base.html`でこの重複を解消する。
+- helpo-foundationの単体FastAPI monolith、SQLAlchemy 2.x、SQLite、Jinja2構成が実装済み（`main.py`、`app/`配下）。
+- **実装済み contracts（2026-08-28 時点）**:
+  - `app/templates/base.html` — `{% block nav_extra %}{% endblock %}` を `<header id="app-header" class="header">` 内に持つ。また `<script src="/static/js/nav.js"></script>` を body 末尾に持つ。
+  - `app/static/js/nav.js` — `#app-header` 要素に client-side でヘッダーを描画する。`localStorage` で現在利用者を保持するモック実装。
+  - `app/router_registry.py` — `RouterRegistry` クラスと `include_registered_routers(app, registry)` 関数が実装済み。`local-user-authentication` タスク 0.1 で共有モジュールレベルインスタンスが追加される。
+  - `app/dependencies.py` — `get_db()` FastAPI依存ジェネレータが実装済み。
+  - `app/routers/pages.py` — `Jinja2Templates(directory="app/templates")` インスタンスが実装済み。各画面ルーターも独自の `Jinja2Templates` インスタンスを作成する。
+- **`app/static/js/nav.js` との共存**: server-side で `nav_extra` ブロックが埋まると `<header>` の innerHTML が空でなくなる。`nav.js` は `#app-header` に既存コンテンツがある場合に描画をスキップするよう更新し、server-side 実装と client-side モックを共存させる（本仕様が `nav.js` の当該更新を所有する）。
+- 各画面テンプレート（`login.html`、`chat.html` 等）は個別に `base.html` を継承する設計であり、そのままでは `nav_extra` ブロックの上書きが画面ごとに重複する。本設計は中間テンプレート `_page_base.html` でこの重複を解消する。
+- **`NavLinkPolicy.build()` 呼び出し機制**: Jinja2 テンプレートから Python クラスメソッドを直接呼び出すのは困難なため、各ページルーターハンドラが `get_current_user_optional()` で `current_user` を取得後、`NavLinkPolicy().build(current_user)` を呼んで `header_menu_context: HeaderMenuContext` を生成し、テンプレートコンテキストへ渡す。`_header_menu.html` は `header_menu_context` を直接描画するのみで判定ロジックを持たない。
 
 ### Architecture Pattern & Boundary Map
 
@@ -122,22 +129,27 @@ helpo/
 ```mermaid
 sequenceDiagram
     participant Browser
+    participant PageRouter
+    participant NavLinkPolicy
     participant PageTemplate
     participant PageBaseTemplate
     participant HeaderMenuView
-    participant NavLinkPolicy
     participant AuthContext
-    Browser->>PageTemplate: GET 各画面
-    PageTemplate->>AuthContext: current_user解決 (get_current_user_optional)
-    AuthContext-->>PageTemplate: CurrentUser または None
-    PageTemplate->>PageBaseTemplate: current_userを渡して継承先を描画
-    PageBaseTemplate->>HeaderMenuView: nav_extraブロックをinclude
-    HeaderMenuView->>NavLinkPolicy: build(current_user)
-    NavLinkPolicy-->>HeaderMenuView: HeaderMenuContext（リンク活性状態・表示要否）
+    Browser->>PageRouter: GET 各画面
+    PageRouter->>AuthContext: get_current_user_optional(request, db)
+    AuthContext-->>PageRouter: CurrentUser または None
+    PageRouter->>NavLinkPolicy: build(current_user)
+    NavLinkPolicy-->>PageRouter: HeaderMenuContext（リンク活性状態・表示要否）
+    PageRouter->>PageTemplate: TemplateResponse({header_menu_context, ...})
+    PageTemplate->>PageBaseTemplate: extends "_page_base.html" → nav_extraブロックをinclude
+    PageBaseTemplate->>HeaderMenuView: include "navigation/_header_menu.html" with header_menu_context
     HeaderMenuView-->>Browser: サービスタイトル・リンク・利用者情報・ログアウトボタンを描画
 ```
 
-`NavLinkPolicy.build`は`current_user`の値だけから決定的にリンク状態を導出し、DBアクセスや外部呼び出しを行わない。
+- 各ページルーターハンドラが `get_current_user_optional()` と `NavLinkPolicy().build()` を呼び出し、`header_menu_context` をテンプレートコンテキストへ渡す。
+- `NavLinkPolicy.build` は `current_user` の値だけから決定的にリンク状態を導出し、DBアクセスや外部呼び出しを行わない。
+- `_header_menu.html` は `header_menu_context` をそのまま描画するだけで判定ロジックを持たない。
+- `header_menu_context` をテンプレートに渡すヘルパー依存関数（例: `get_header_menu_context(current_user)`）を `app/navigation/policy.py` に提供し、各ルーターが再利用できるようにする。
 
 ## Requirements Traceability
 
@@ -233,9 +245,10 @@ class NavLinkPolicy:
 - Concurrency strategy: 該当なし（ステートレスな描画のみ）
 
 **Implementation Notes**
-- Integration: `_page_base.html`の`nav_extra`ブロックからincludeされ、呼び出し元テンプレートが渡す`current_user`変数を用いて`NavLinkPolicy.build`を呼び出す。
-- Validation: `current_user.role`が`"user"`/`"admin"`以外の値を取り得ないことはlocal-user-authentication側の制約に依拠する（本コンポーネントは再検証しない）。
+- Integration: `_page_base.html` の `nav_extra` ブロックから `{% include "navigation/_header_menu.html" %}` として呼び出される。`header_menu_context` はルーターハンドラが事前に `NavLinkPolicy().build(current_user)` で生成してテンプレートコンテキストへ渡す（テンプレート内で Python ロジックは呼び出さない）。
+- Validation: `current_user.role` が `"user"`/`"admin"` 以外の値を取り得ないことはlocal-user-authentication側の制約に依拠する（本コンポーネントは再検証しない）。
 - Risks: local-user-authenticationの`_nav.html`と機能が重複したまま両方が実装されると、利用者名・ログアウトボタンが二重表示される。実装順序としてlocal-user-authentication側の整理を先行または並行して行う必要がある（Revalidation Triggers参照）。
+- **`app/static/js/nav.js` との共存**: `nav.js` を更新し `#app-header` の `innerHTML` が空の場合のみ client-side 描画を行うようにする。`_page_base.html` 経由のサーバー側描画が優先され、`nav.js` は未実装画面（placeholder等）でのみ機能するようになる。
 
 ### PageBaseTemplate
 
@@ -245,11 +258,13 @@ class NavLinkPolicy:
 | Requirements | 1.1, 1.3 |
 
 **Responsibilities & Constraints**
-- `app/templates/_page_base.html`として実装し、`{% extends "base.html" %}`した上で`{% block nav_extra %}{% include "navigation/_header_menu.html" %}{% endblock %}`のみを定義する。
-- `content`等の他ブロックは素通しし、画面テンプレート側の責務を変更しない。
+- `app/templates/_page_base.html` として実装し、`{% extends "base.html" %}` した上で `{% block nav_extra %}{% include "navigation/_header_menu.html" %}{% endblock %}` のみを定義する。
+- `content` 等の他ブロックは素通しし、画面テンプレート側の責務を変更しない。
+- ルーターハンドラが `header_menu_context` をテンプレートコンテキストへ渡すことを前提とする。`header_menu_context` が未設定の場合は `NavLinkPolicy().build(None)` 相当（全リンク非活性）として扱う（フォールバック）。
 
 **Implementation Notes**
-- Integration: 各画面所有仕様は自身のテンプレートの継承先を`base.html`から`_page_base.html`に変更するだけでヘッダーメニューを取得できる（本仕様はこの契約提供のみを担い、変更作業自体は行わない）。
+- Integration: 各画面所有仕様は自身のテンプレートの継承先を `base.html` から `_page_base.html` に変更し、ルーターハンドラで `header_menu_context` を渡すだけでヘッダーメニューを取得できる（本仕様はこの契約提供のみを担い、変更作業自体は行わない）。
+- **Template variable contract**: ルーターハンドラは `header_menu_context: HeaderMenuContext` を必ずテンプレートコンテキストに含める。`NavLinkPolicy` のインポートパス: `from app.navigation.policy import NavLinkPolicy`。`CurrentUser` のインポートパス: `from app.auth.schemas import CurrentUser`（local-user-authentication 所有）。
 
 ## Data Models
 

@@ -5,15 +5,26 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.config import Settings
 from app.db import DatabaseEngine
 from app.logging_conf import configure_logging, log_exception
-from app.router_registry import RouterRegistry, include_registered_routers
+from app.router_registry import router_registry, include_registered_routers
 from app.routers.pages import router as pages_router
+
+# 下位機能ルーターを共有レジストリへ登録（import 順に登録される）
+import app.auth  # noqa: F401  — AuthRouter を router_registry へ登録
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
     configure_logging(debug=settings.debug)
-    DatabaseEngine().init(settings)
+    engine = DatabaseEngine()
+    engine.init(settings)
+    # 研修用初期利用者シード
+    from app.auth.seed import seed_initial_users
+    db = engine.get_session()
+    try:
+        seed_initial_users(db)
+    finally:
+        db.close()
     yield
 
 
@@ -28,9 +39,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title="HELPO", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
     app.add_exception_handler(Exception, handle_exception)
-    registry = RouterRegistry()
-    registry.register_router(pages_router)
-    include_registered_routers(app, registry)
+    # 共有レジストリをコピーしてから pages_router を追加（重複登録を防ぐ）
+    from app.router_registry import RouterRegistry as _RR
+    local_registry = _RR()
+    for r, prefix, tags in router_registry._routers:
+        local_registry.register_router(r, prefix, tags)
+    local_registry.register_router(pages_router)
+    include_registered_routers(app, local_registry)
     return app
 
 

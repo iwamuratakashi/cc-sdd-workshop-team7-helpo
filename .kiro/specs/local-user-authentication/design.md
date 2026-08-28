@@ -42,7 +42,7 @@ local-user-authenticationは、helpo-foundation上にローカル資格情報、
 
 ### Allowed Dependencies
 
-- helpo-foundationの`Settings`、`DatabaseEngine.get_session()`/`get_db()`、`BaseEntity`、`BaseRepository`、MigrationRunner、ErrorHandler、WebLayout、`RouterRegistry`
+- helpo-foundationの`Settings`（`app/config.py`）、`DatabaseEngine`（`app/db.py`、シングルトン）、`get_db()`（`app/dependencies.py`のFastAPI依存ジェネレータ）、`BaseEntity`・`Base`（`app/base_models.py`）、`BaseRepository`（`app/base_repository.py`）、`MigrationRunner`（`app/migrations.py`）、`RouterRegistry`・`include_registered_routers()`（`app/router_registry.py`）
 - FastAPIのRouter、Depends、Request/Response、Jinja2テンプレート連携
 - SQLAlchemy 2.x（foundationと同一Engine/Session）
 - Argon2idを提供する`argon2-cffi`（パスワードハッシュ）
@@ -67,6 +67,12 @@ local-user-authenticationは、helpo-foundation上にローカル資格情報、
 - 認証テーブルはfoundationと同じEngineおよびMigrationRunnerで管理し、独自接続や独自commit境界を作らない。
 - 認証例外の401/403は機能固有ハンドラで処理し、予期しない例外はfoundation ErrorHandlerの`{"detail":"Internal server error"}`契約へ委譲する。
 - 認証画面は`base.html`を継承し、既存の`header`、`main`、`footer`と`content`ブロックおよび拡張ブロックを維持する。
+- **RouterRegistry 実装契約（実装確認済み）**: `app/router_registry.py` に `RouterRegistry` クラスと `include_registered_routers(app, registry)` 関数が実装済み。`main.py` では `create_app()` 内でローカルに `RouterRegistry()` インスタンスを生成している。`AuthRouter` を foundation の `main.py` を直接変更せずに登録するため、`router_registry.py` にモジュールレベルの `router_registry = RouterRegistry()` インスタンスを追加し、`main.py` がこれを利用するよう更新する。`app/auth/__init__.py` はこの共有インスタンスへ import 時に `AuthRouter` を登録する。
+- **`get_db()` 実装済み**: `app/dependencies.py` に `get_db()` FastAPI依存ジェネレータが実装済み。`get_db_engine().get_session()` を使ってセッションを提供する。
+- **MigrationRunner 実装済み**: `app/migrations.py` の `MigrationRunner` は `migrations/` ディレクトリの `.sql` ファイルをファイル名（stem）の昇順で自動適用し、`foundation_meta` テーブルで適用済みバージョンを追跡する。`002_local_user_authentication.sql` は `001_baseline.sql` の後に自動適用される。
+- **Jinja2Templates**: `app/routers/pages.py` が `Jinja2Templates(directory="app/templates")` を独自インスタンスで保持する。`app/auth/router.py` も同じディレクトリを指す独自の `Jinja2Templates` インスタンスを作成する（foundationが共有インスタンスを export しないため）。
+- **`pages.py` 仮ルート**: `app/routers/pages.py` には `GET /login` の仮ルート（`placeholder.html` を返す）が存在する。`AuthRouter` の `GET /login` 登録後は、`pages.py` 側の仮ルートを削除して衝突を回避する。
+- **`app/static/js/nav.js`**: foundationが `base.html` に含める client-side ヘッダー描画スクリプト。`#app-header` 要素の innerHTML が空の場合にのみ描画する（server-side 実装との共存チェックは `header-navigation-menu` 仕様が所有する）。
 
 ### Architecture Pattern & Boundary Map
 
@@ -144,13 +150,15 @@ helpo/
 
 ### Modified Files
 
-- `pyproject.toml` — `argon2-cffi`依存を追加する。
-- `app/auth/settings.py` — 認証専用設定を feature-local に定義し、foundation の `ConfigManager` 拡張ポイントを通じて検証する。ログイン試行制限のしきい値・ロック期間・追跡用Cookie名も含める。
-- `app/auth/dependencies.py` — 認証・認可に必要な FastAPI 依存関数を feature-local に公開する。
-- `app/auth/router.py` — `AuthRouter` を実装し、foundation の `RouterRegistry` 拡張インターフェースを通じて登録する。ログイン処理に `LoginAttemptGuard` を組み込む。
+- `pyproject.toml` — `argon2-cffi` 依存を追加する。
+- `app/auth/settings.py` — 認証専用設定を feature-local に定義し、foundation の `Settings`（`extra="ignore"` のため、独自の `BaseSettings` サブクラスとして共存できる）拡張ポイントを通じて読み込む。`app/config.py` は直接変更しない。
+- `app/auth/dependencies.py` — 認証・認可に必要な FastAPI 依存関数を feature-local に公開する（`app/dependencies.py` の `get_db()` を利用する）。
+- `app/auth/router.py` — `AuthRouter` を実装し、`app/router_registry.py` の共有モジュールレベルインスタンス `router_registry` を通じて登録する。ログイン処理に `LoginAttemptGuard` を組み込む。
 - `app/auth/lockout.py` — `LoginAttemptGuard` を新規実装し、ブラウザ単位の失敗回数追跡とロック判定を提供する。
-- `app/templates/auth/_nav.html` — foundation の `base.html` 拡張ブロック（nav/header）を経由して認証状態ナビゲーションを提供する。
-- foundation の `app/router_registry.py` — `AuthRouter` が登録される。
+- `app/templates/auth/_nav.html` — foundation の `base.html` 拡張ブロック（`nav_extra`）を経由して認証状態ナビゲーションを提供する。`header-navigation-menu` 実装後は本ファイルの責務が引き継がれ縮小される。
+- `app/router_registry.py` — モジュールレベルの共有 `RouterRegistry` インスタンス（`router_registry = RouterRegistry()`）を追加する。`AuthRouter` はこのインスタンスを通じて登録される。
+- `main.py` — `create_app()` を更新して、ローカルインスタンスの代わりに共有 `router_registry` インスタンスを利用する。また `app.auth` を import し `AuthRouter` が登録された状態にする。`pages.py` の仮 `GET /login` ルートを削除する。
+- `migrations/002_local_user_authentication.sql` — `users`・`auth_sessions`・`login_attempt_trackers` テーブルおよび索引を追加する（foundation 既存テーブルを変更しない）。
 
 ## System Flows
 

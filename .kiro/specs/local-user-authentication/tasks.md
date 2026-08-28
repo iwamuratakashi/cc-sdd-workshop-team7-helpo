@@ -2,45 +2,63 @@
 
 ## 実装タスク
 
+- [ ] 0. foundation RouterRegistry をモジュールレベル共有インスタンスへ更新する
+- [ ] 0.1 `app/router_registry.py` にモジュールレベル共有インスタンスを追加する
+  - `router_registry.py` に `router_registry = RouterRegistry()` をモジュールレベルで追加する。
+  - `main.py` の `create_app()` を更新し、ローカルインスタンスの代わりに共有 `router_registry` を利用する。
+  - `app/auth` import 時に `AuthRouter` が共有 `router_registry` へ登録される仕組みにする（`app/auth/__init__.py` または登録モジュール）。
+  - `app/routers/pages.py` の仮 `GET /login` ルートを削除する（`AuthRouter` の `GET /login` と衝突するため）。
+  - 完了状態: foundation の `create_app()` が `app/auth` をインポートした状態で起動でき、`GET /login` がAuthRouterのルートとして動作する。
+  - _Requirements: 1, 7, 8 (helpo-foundation)_
+  - _Boundary: RouterRegistry_
+
 - [ ] 1. 認証設定と永続化スキーマを整備する
 - [ ] 1.1 認証用設定を feature-local に追加する
-  - `app/auth/settings.py` に `AuthSettings` を作成し、セッション有効期間、Cookie名、Cookieのセキュリティ属性を定義する。
-  - foundation の `ConfigManager` 拡張ポイントを通じて読み込み・検証し、`app/config.py` は直接変更しない。
+  - `app/auth/settings.py` に `AuthSettings(BaseSettings)` を作成し、セッション有効期間、Cookie名、Cookieのセキュリティ属性、ログイン試行制限しきい値・ロック期間・追跡Cookie名を定義する。
+  - foundation の `Settings`（`extra="ignore"` のため `app/config.py` を直接変更せず）と共存させる。
   - 秘密値に安全でない値が指定された場合は起動前に拒否し、既存のデータベースURL・ホスト・ポート設定を変更しない。
   - 完了状態: 既定のローカル設定で起動でき、不正な認証設定は基盤のfail-fastエラーとして検出される。
-  - _Requirements: 3.1, 3.3, 6.4, 7.1, 7.2_
+  - _Requirements: 3.1, 3.3, 6.4, 7.1, 7.2, 8.1, 8.2_
   - _Boundary: AuthSettings_
-- [ ] 1.2 利用者と認証セッションのマイグレーションを追加する
-  - 共通基底エンティティを継承する利用者データと、失効・期限を管理できるセッションデータを同じSQLiteスキーマへ追加する。
-  - ユーザー名の一意制約、基本ロールの制約、セッション検索用索引、および利用者削除時の参照整合性を定義する。
+- [ ] 1.2 利用者・認証セッション・ログイン試行追跡のマイグレーションを追加する
+  - `migrations/002_local_user_authentication.sql` に `users`・`auth_sessions`・`login_attempt_trackers` テーブルと索引を追加する。
+  - foundation の `MigrationRunner`（`app/migrations.py`）が `migrations/*.sql` をファイル名昇順で自動適用する仕組みを利用する。`app/migrations.py` は変更しない。
+  - ユーザー名の一意制約、基本ロールの制約、セッション検索用索引、利用者削除時の参照整合性、`login_attempt_trackers` の `tracker_token_digest` 一意索引を定義する。
   - 完了状態: 空DBと既存foundation DBの双方へマイグレーションを適用でき、再適用しても既存データが壊れない。
-  - _Requirements: 1.1, 1.3, 1.4, 3.1, 7.2_
+  - _Requirements: 1.1, 1.3, 1.4, 3.1, 7.2, 8.1_
   - _Boundary: AuthMigration_
 
 - [ ] 2. 資格情報と認証データアクセスを実装する
 - [ ] 2.1 (P) パスワードのハッシュ化と検証を実装する
-  - 実績あるパスワードハッシュライブラリを用いて、平文パスワードから一方向ハッシュを生成し照合する。
+  - `argon2-cffi` を `pyproject.toml` に追加し、`app/auth/password_hasher.py` に `PasswordHasher` を実装する。
   - 検証結果や例外に入力パスワードとハッシュを含めない。
   - 完了状態: 同じパスワードは検証に成功し、異なるパスワードは失敗し、保存値から平文を復元できない。
   - _Requirements: 1.2, 2.2, 6.4_
   - _Boundary: PasswordHasher_
   - _Depends: 1.1_
 - [ ] 2.2 (P) 利用者リポジトリを実装する
-  - 基盤のセッション注入とトランザクション規約を使い、ユーザーID・正規化ユーザー名による検索と利用者作成を提供する。
+  - `app/auth/repository.py` に `UserRepository` を実装する。`app/dependencies.py` の `get_db()` で提供される foundation Session を利用する。
   - 重複ユーザー名、許可外ロール、および無効状態を一貫して扱う。
   - 完了状態: 利用者を作成・検索でき、重複名と許可外ロールは既存レコードを変更せず拒否される。
   - _Requirements: 1.1, 1.3, 1.4, 2.3_
   - _Boundary: UserRepository_
   - _Depends: 1.2_
 - [ ] 2.3 (P) 認証セッションリポジトリを実装する
-  - 推測困難なセッション識別子のダイジェストだけを保存し、作成、検索、失効、および期限判定を提供する。
-  - セッション操作は呼び出し元の基盤トランザクション境界に従う。
+  - `app/auth/repository.py` に `SessionRepository` を追加する。推測困難なセッション識別子のダイジェストだけを保存し、作成、検索、失効、および期限判定を提供する。
+  - セッション操作は呼び出し元の基盤トランザクション境界に従う（repository内で commit しない）。
   - 完了状態: 有効セッションだけを取得でき、失効済み・期限切れ・不明な識別子はいずれも取得できない。
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
   - _Boundary: SessionRepository_
   - _Depends: 1.2_
-- [ ] 2.4 ローカル利用者作成コマンドを実装する
-  - パスワードを非表示で対話入力し、ユーザー名と`user`/`admin`ロールを検証して利用者を作成する。
+- [ ] 2.4 (P) ログイン試行追跡リポジトリを実装する
+  - `app/auth/repository.py` に `LoginAttemptRepository` を追加する。ブラウザ単位（`tracker_token_digest`）の失敗回数・ロック状態の取得・記録・リセットを提供する。
+  - `login_attempt_trackers` テーブルと `users` テーブルは外部キー関係を持たない（Req 8.1）。
+  - 完了状態: 失敗回数の増加、ロック状態の設定、成功時のリセット、期間経過後の自動解除がデータレベルで動作する。
+  - _Requirements: 8.1, 8.2, 8.5, 8.6_
+  - _Boundary: LoginAttemptRepository_
+  - _Depends: 1.2_
+- [ ] 2.5 ローカル利用者作成コマンドを実装する
+  - `app/auth/cli/create_user.py` にパスワードを非表示で対話入力し、ユーザー名と`user`/`admin`ロールを検証して利用者を作成する。
   - 重複名・不正ロール・空パスワードではトランザクションをロールバックし、秘密値を出力しない。
   - 完了状態: 空DBに最初の管理者と一般利用者を作成でき、その資格情報で後続のログインテストを実行できる。
   - _Requirements: 1.2, 1.3, 1.4, 1.5_
@@ -49,46 +67,72 @@
 
 - [ ] 3. 認証サービスと利用者コンテキストを実装する
 - [ ] 3.1 ログイン・ログアウトの認証サービスを実装する
-  - 利用者検索、パスワード照合、有効状態確認、セッション発行、および対象セッション失効を統合する。
-  - 不明ユーザー、誤パスワード、無効ユーザーを同じ認証失敗へ正規化し、再ログイン時は新しいセッションを発行する。
+  - `app/auth/service.py` に `AuthService` を実装し、利用者検索、パスワード照合、有効状態確認、セッション発行、および対象セッション失効を統合する。
+  - 不明ユーザー、誤パスワード、無効ユーザーを同じ認証失敗（`InvalidCredentials`）へ正規化し、再ログイン時は新しいセッションを発行する。
+  - `app/dependencies.py` の `get_db()` で提供される foundation Session を利用し、成功時のみ commit する。
   - 完了状態: 有効な資格情報だけがセッションを取得でき、ログアウト後および期限切れ後はそのセッションを利用できない。
   - _Requirements: 2.1, 2.2, 2.3, 3.2, 3.3, 3.4_
   - _Boundary: AuthService_
-- [ ] 3.2 現在利用者の解決と認可ポリシーを実装する
-  - セッションから安全な利用者表現を解決し、認証必須、管理者必須、本人所有の三つの判定を提供する。
+- [ ] 3.2 ログイン試行制限ガードを実装する
+  - `app/auth/lockout.py` に `LoginAttemptGuard` を実装する。`is_locked()`・`register_failure()`・`register_success()` を提供し、`LoginAttemptRepository` へ委譲する。
+  - しきい値到達でロック、ロック期間経過後は自動解除、成功時はカウントリセットを行う。
+  - 追跡対象はユーザー名・ユーザーIDではなくブラウザ単位の匿名乱数トークン（`tracker_token_digest`）とする（Req 8.1）。
+  - 完了状態: しきい値到達で `is_locked()` が `true` を返し、ロック期間経過または成功後に `false` に戻る。
+  - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
+  - _Boundary: LoginAttemptGuard_
+  - _Depends: 2.4_
+- [ ] 3.3 現在利用者の解決と認可ポリシーを実装する
+  - `app/auth/dependencies.py` に `get_current_user_optional`・`require_authenticated_user`・`require_admin`・`require_owner` を実装する。
+  - セッションから安全な利用者表現（`CurrentUser`）を解決し、認証必須、管理者必須、本人所有の三つの判定を提供する。
   - 本人所有は現在のユーザーIDと後続機能が渡す所有者ユーザーIDの一致だけを判定し、FAQや履歴を読み込まない。
   - 完了状態: 未認証は401、ロール不足と所有者不一致は403となり、成功時は秘密情報を含まない現在利用者を取得できる。
   - _Requirements: 4.1, 4.3, 4.4, 5.1, 5.2, 5.3, 5.4, 6.2, 6.3_
   - _Boundary: AuthContext, AuthorizationPolicy_
+  - _Depends: 2.2, 2.3_
 
 - [ ] 4. HTTP認証フローと共通画面を統合する
-- [ ] 4.1 認証ルーターとセッションCookie処理を実装する
-  - `app/auth/router.py` にログイン画面、ログイン送信、ログアウト、および現在利用者の機械向けエンドポイントを追加する。
-  - `AuthRouter` は foundation の `RouterRegistry` 拡張インターフェースを通じて登録する。
+- [ ] 4.1 研修用初期利用者をシードする
+  - アプリケーション起動時（または migration 適用後）に `user01`（ロール: `user`、パスワード: `password`）と `admin01`（ロール: `admin`、パスワード: `password`）を自動登録する。
+  - 同名の利用者が既に存在する場合はスキップし、既存データを変更しない（Req 9.3）。
+  - パスワードは Argon2id ハッシュで保存し、平文は一切保持しない（Req 9.4）。
+  - 完了状態: 起動後すぐに `user01`/`password` と `admin01`/`password` でログインできる。
+  - _Requirements: 9.1, 9.2, 9.3, 9.4_
+  - _Boundary: LocalUserProvisioner_
+  - _Depends: 2.1, 2.2, 1.2_
+- [ ] 4.2 認証ルーターとセッションCookie処理を実装する
+  - `app/auth/router.py` にログイン画面 (`GET /login`)、ログイン送信 (`POST /login`)、ログアウト (`POST /logout`)、現在利用者 (`GET /api/auth/me`) エンドポイントを追加する。
+  - `POST /login` に `LoginAttemptGuard` を組み込み、しきい値到達で 429 を返す。試行追跡 Cookie（`auth_attempt_cookie_name`）を発行・更新する。
+  - `AuthRouter` はタスク 0.1 で追加した `app/router_registry.py` の共有 `router_registry` インスタンスへ登録する（`app/routers/` や `main.py` の直接変更なし）。
   - Cookieへ生のセッション識別子だけを設定し、HttpOnly・SameSite・設定駆動のSecure属性と有効期間を適用する。
+  - `app/auth/router.py` は独自の `Jinja2Templates(directory="app/templates")` インスタンスを作成してテンプレートを描画する。
   - ブラウザ画面は未認証時にログインへ誘導し、機械向け境界は401、権限不足は403、予期しない例外は基盤の汎用500処理へ委譲する。
-  - 完了状態: HTTPクライアントでログインから現在利用者取得、ログアウト、ログアウト後の401までを確認できる。
-  - _Requirements: 2.1, 2.2, 2.4, 3.1, 3.2, 4.1, 4.3, 6.1, 6.2, 6.3, 6.5_
+  - 完了状態: HTTPクライアントでログインから現在利用者取得、ログアウト、ログアウト後の401まで確認でき、5回連続失敗後に 429 が返る。
+  - _Requirements: 2.1, 2.2, 2.4, 3.1, 3.2, 4.1, 4.3, 6.1, 6.2, 6.3, 6.5, 8.2, 8.3, 8.4_
   - _Boundary: AuthRouter_
-- [ ] 4.2 基盤レイアウトへ認証状態表示を接続する
-  - `app/templates/auth/_nav.html` を作成し、foundation の `base.html` 拡張ブロック（nav/header）を経由して未認証時のログイン導線と認証済み時のユーザー名・基本ロール・ログアウト操作を表示する。
-  - 基盤の `base.html` 本体は直接変更せず、拡張ブロックを利用する。
-  - テンプレートコンテキストへパスワード、ハッシュ、セッション識別子を渡さない。
+  - _Depends: 3.1, 3.2, 3.3_
+- [ ] 4.3 基盤レイアウトへ認証状態表示を接続する
+  - `app/templates/auth/login.html` を `base.html` を継承して実装する（ユーザー名・パスワード入力フォーム、エラーメッセージ表示）。
+  - `app/templates/auth/_nav.html` を作成し、foundation の `base.html` の `nav_extra` 拡張ブロックを上書きして、未認証時のログイン導線と認証済み時のユーザー名・基本ロール・ログアウト操作を表示する。
+  - テンプレートコンテキストは `current_user: CurrentUser | None` のみを渡し、パスワード・ハッシュ・セッション識別子は含めない。
+  - ログアウトボタンは `POST /logout` へフォーム送信する形式とし、`GET` リンクにはしない。
   - 完了状態: 未認証画面にはログイン導線が、認証済み画面には安全な現在利用者情報とログアウト操作が表示される。
   - _Requirements: 4.2, 4.4, 6.1, 6.4_
   - _Boundary: AuthWebUI_
+  - _Depends: 4.2_
 
 - [ ] 5. セキュリティ・境界・回帰を検証する
 - [ ] 5.1 認証コンポーネントの単体テストを作成する
   - ハッシュ照合、重複ユーザー名、基本ロール制約、無効利用者、セッション期限・失効、および認可判定を検証する。
+  - ログイン試行制限: しきい値到達でロック、期間経過後の解除、成功時のリセット、ユーザー名非依存を検証する（Req 8.1, 8.2, 8.5, 8.6）。
   - ログとエラー表現に資格情報、ハッシュ、セッション識別子が含まれないことを検証する。
-  - 完了状態: 認証の正常系・主要な拒否系・機密情報非露出の単体テストがすべて合格する。
-  - _Requirements: 1.2, 1.4, 2.2, 2.3, 3.3, 5.1, 5.2, 5.3, 6.3, 6.4_
+  - 完了状態: 認証の正常系・主要な拒否系・機密情報非露出・ブルートフォース対策の単体テストがすべて合格する。
+  - _Requirements: 1.2, 1.4, 2.2, 2.3, 3.3, 5.1, 5.2, 5.3, 6.3, 6.4, 8.1, 8.2, 8.5, 8.6_
   - _Boundary: AuthTestSuite_
 - [ ] 5.2 ログインからログアウトまでの結合・E2Eテストを作成する
   - foundationの実DBセッション、マイグレーション、ASGIアプリ、テンプレートを通して認証フローを検証する。
-  - 未認証画面リダイレクト、401/403、現在利用者表示、Cookie属性、再ログイン時の新規セッション、および基盤500エラー契約を確認する。
+  - 未認証画面リダイレクト、401/403/429、現在利用者表示、Cookie属性、再ログイン時の新規セッション、および基盤500エラー契約を確認する。
+  - 研修用初期利用者（`user01`/`admin01`）が起動後にログインできることを確認する。
   - 外部認証サービスなしのローカル構成で一連のテストを実行する。
   - 完了状態: `pytest`でfoundation回帰を含む認証フローが合格し、FAQ・履歴・分析・SSOの実装を追加していないことを確認できる。
-  - _Requirements: 2.1, 2.4, 3.1, 3.2, 3.4, 4.1, 4.2, 4.3, 5.4, 6.1, 6.2, 6.5, 7.1, 7.2, 7.3_
+  - _Requirements: 2.1, 2.4, 3.1, 3.2, 3.4, 4.1, 4.2, 4.3, 5.4, 6.1, 6.2, 6.5, 7.1, 7.2, 7.3, 8.2, 8.3, 9.1, 9.2_
   - _Boundary: AuthIntegrationTestSuite_

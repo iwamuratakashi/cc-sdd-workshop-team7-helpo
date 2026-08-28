@@ -1,16 +1,25 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.templating import Jinja2Templates
+
+from app.auth.dependencies import get_current_user_optional
+from app.auth.schemas import CurrentUser
+from app.navigation.policy import NavLinkPolicy
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 
+def _nav_ctx(current: CurrentUser | None) -> dict:
+    return {"header_menu_context": NavLinkPolicy().build(current)}
+
+
 @router.get("/")
-def index(request: Request):
+def index(
+    request: Request,
+    current: CurrentUser | None = Depends(get_current_user_optional),
+):
     return templates.TemplateResponse(
-        request,
-        "index.html",
-        {},
+        request, "index.html", _nav_ctx(current)
     )
 
 
@@ -24,30 +33,21 @@ def history(request: Request):
 
 
 # --- 下流機能が未実装の間の仮ルート ---
-# local-user-authentication spec が実装されたら RouterRegistry 経由で上書きされる
-
-@router.get("/login")
-def login_placeholder(request: Request):
-    return templates.TemplateResponse(
-        request,
-        "placeholder.html",
-        {"page_title": "ログイン"},
-    )
-
-
 @router.get("/chat")
-def chat_placeholder(request: Request):
+def chat_placeholder(
+    request: Request,
+    current: CurrentUser | None = Depends(get_current_user_optional),
+):
     return templates.TemplateResponse(
-        request,
-        "placeholder.html",
-        {"page_title": "質問（チャット）"},
+        request, "placeholder.html", {"page_title": "質問（チャット）", **_nav_ctx(current)}
     )
 
 
 @router.get("/faqs/upload")
-def faq_upload_placeholder(request: Request):
+def faq_upload_placeholder(
+    request: Request,
+    current: CurrentUser | None = Depends(get_current_user_optional),
+):
     return templates.TemplateResponse(
-        request,
-        "placeholder.html",
-        {"page_title": "FAQ管理"},
+        request, "placeholder.html", {"page_title": "FAQ管理", **_nav_ctx(current)}
     )

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+
+{# 各画面テンプレートの継承先。nav_extra ブロックにヘッダーメニューを注入する。
+   ルーターハンドラは必ず header_menu_context: HeaderMenuContext をテンプレートコンテキストへ渡すこと。
+   未設定時のフォールバック: header_menu_context が undefined のとき _header_menu.html は描画をスキップする。#}
+{% block nav_extra %}
+  {% include "navigation/_header_menu.html" %}
+{% endblock %}

@@ -17,3 +17,7 @@ class RouterRegistry:
 def include_registered_routers(app: FastAPI, registry: RouterRegistry) -> None:
     for router, prefix, tags in registry._routers:
         app.include_router(router, prefix=prefix, tags=tags)
+
+
+# 下位機能が import 時に自らのルーターを登録するための共有インスタンス
+router_registry = RouterRegistry()

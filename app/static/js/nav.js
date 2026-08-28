@@ -151,6 +151,10 @@
     if (!container) {
       return;
     }
+    // server-side で nav_extra ブロックが埋まっている場合はスキップする
+    if (container.innerHTML.trim() !== '') {
+      return;
+    }
     ensureStyles();
     var currentUser = getCurrentMockUser();
     var context = buildHeaderMenuContext(currentUser);
