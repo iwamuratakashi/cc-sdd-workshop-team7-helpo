@@ -4,17 +4,21 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from app.config import Settings
 from app.db import DatabaseEngine
+from app.logging_conf import configure_logging, log_exception
 from app.router_registry import RouterRegistry, include_registered_routers
 from app.routers.pages import router as pages_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    DatabaseEngine().init(Settings())
+    settings = Settings()
+    configure_logging(debug=settings.debug)
+    DatabaseEngine().init(settings)
     yield
 
 
-def handle_exception(request: Request, exc: Exception):
+async def handle_exception(request: Request, exc: Exception):
+    log_exception(exc, context={"path": str(request.url.path), "method": request.method})
     if request.url.path.startswith("/api"):
         return JSONResponse({"detail": "Internal server error"}, status_code=500)
     return HTMLResponse("<h1>Internal Server Error</h1>", status_code=500)

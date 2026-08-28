@@ -1,4 +1,4 @@
-# Design Document
+﻿# Design Document
 
 ## Overview
 HELPO foundationは、社内FAQ向けAIヘルプデスクのコアとなるPython/FastAPI一体型アプリケーション、SQLite永続化、環境設定、共通データアクセス、基本画面レイアウトを提供する。開発者・運用者がWindows PC上でGPU不要かつ外部サービス不要で起動・検証できる出発点となる。
@@ -28,7 +28,8 @@ HELPO foundationは、社内FAQ向けAIヘルプデスクのコアとなるPytho
 ### Out of Boundary
 - ユーザー認証・ロール管理（local-user-authentication）
 - FAQのCRUD・Embedding・検索（faq-management-and-search）
-- AIチャット・履歴（ai-helpdesk-chat）
+- AIチャット・回答生成（ai-helpdesk-chat）
+- チャット履歴の永続化・表示・本人所有判定（chat-history）
 - 本番向け監視・分散・高可用性基盤
 
 ### Allowed Dependencies
@@ -148,10 +149,14 @@ sequenceDiagram
 | 2 | 環境設定読み込み | ConfigManager | Service | 起動フロー |
 | 3 | ローカル永続化 | DatabaseEngine, MigrationRunner | Service, Batch | 起動フロー |
 | 4 | 共通データアクセス | BaseRepository, DatabaseEngine | Service | - |
-| 5 | 基本Web画面構成 | WebLayout, WebRouter | State | - |
-| 6 | ローカルAI実行設定拡張ポイント | ConfigManager | Service | - |
-| 7 | エラー報告とログ | ErrorHandler, AppServer | Service, API | 起動フロー |
-| 8 | 研修用MVP軽量性 | AppServer, ConfigManager, DatabaseEngine | Service, API, State | 起動フロー |
+| 5 | 共通画面構成と機能導線 | WebLayout, WebRouter | State | - |
+| 6 | 下流機能の拡張と接続 | RouterRegistry, ConfigManager, WebLayout | Service | - |
+| 7 | 共通エラー応答とログ | ErrorHandler, AppServer | Service, API | 起動フロー |
+| 8 | ローカルMVP動作条件 | AppServer, ConfigManager, DatabaseEngine | Service, API, State | 起動フロー |
+| 9 | 認証後の機能横断的な利用 | RouterRegistry, WebLayout | State | - |
+| 10 | FAQ登録と検索の連携 | RouterRegistry, ConfigManager | Service | - |
+| 11 | FAQを根拠とするチャット回答 | RouterRegistry, WebLayout | State | - |
+| 12 | 本人チャット履歴の記録と確認 | RouterRegistry, WebLayout, DatabaseEngine | Service, State | - |
 
 ## Components and Interfaces
 

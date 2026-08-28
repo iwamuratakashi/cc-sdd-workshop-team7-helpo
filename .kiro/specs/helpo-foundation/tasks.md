@@ -96,3 +96,31 @@
   - 完了状態: `pytest` がすべて合格する
   - _Requirements: 1, 3, 5, 8_
   - _Boundary: TestSuite_
+
+- [x] 8. 設計 Contracts の不足実装を補完する（要件・設計修正対応）
+- [x] 8.1 ConfigManager に設計 Contracts で定義されたメソッドと型を追加する
+  - `LocalAISettings` 型を `app/config.py` に追加する
+  - `Settings.get_database_url() -> str` メソッドを実装する
+  - `Settings.get_local_ai_settings() -> LocalAISettings | None` メソッドを実装する
+  - 単体テストで各メソッドの動作を検証する
+  - 完了状態: `pytest` が全件合格し、メソッドが設計の Contracts 通りに動作する
+  - _Requirements: 2, 6_
+  - _Boundary: ConfigManager_
+- [x] 8.2 ロギング設定モジュールを作成し、エラーハンドラに組み込む
+  - `app/logging_conf.py` を新規作成し、`configure_logging(debug)` と `log_exception(exc, context)` を実装する
+  - `main.py` の `handle_exception` を `async` 対応にして `log_exception` を呼び出す
+  - `lifespan` 起動時に `configure_logging()` を呼び出す
+  - 完了状態: 未処理例外が発生した際にサーバーログへ詳細が記録され、利用者には汎用エラーレスポンスが返る
+  - _Requirements: 7, 1_
+  - _Boundary: ErrorHandler_
+- [x] 8.3 base.html に `nav_extra` ブロックを追加する
+  - `app/templates/base.html` の `<header>` 内に `{% block nav_extra %}{% endblock %}` を追加する
+  - 下位機能がナビゲーション要素を `base.html` を直接変更せずに差し込める拡張ポイントを確保する
+  - 完了状態: 下位機能テンプレートが `{% block nav_extra %}` を上書きすることでヘッダー内に独自 HTML を注入できる
+  - _Requirements: 5, 6_
+  - _Boundary: WebLayout_
+
+## Implementation Notes
+- `Settings` は `extra="ignore"` を設定しており、下位機能は独自の `BaseSettings` サブクラスを定義して拡張できる（`app/config.py` を直接変更しない）。
+- `handle_exception` は `async def` が必須。FastAPI の例外ハンドラは非同期関数として登録する必要がある。
+- `logging_conf.py` の `configure_logging()` は重複ハンドラを防ぐため `if not root_logger.handlers:` で条件付き追加している。テスト環境では `lifespan` を経由しない場合があるため、`get_logger()` で取得したロガーは既存設定を引き継ぐ。

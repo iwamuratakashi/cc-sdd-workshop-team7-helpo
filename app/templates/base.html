@@ -8,7 +8,9 @@
   {% block header_extra %}{% endblock %}
 </head>
 <body>
-  <header id="app-header" class="header"></header>
+  <header id="app-header" class="header">
+    {% block nav_extra %}{% endblock %}
+  </header>
   <main class="container">
     {% block content %}{% endblock %}
   </main>

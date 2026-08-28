@@ -10,10 +10,10 @@
 
   var STORAGE_KEY = 'helpo_mock_current_user';
 
-  // 3リンク固定。非活性でも非表示にはしない。
+  // ログイン済み用ナビリンク（非活性でも遷移可能）
   var NAV_LINKS_CONFIG = [
-    { key: 'question', href: '/chat', label: '質問' },
-    { key: 'history', href: '/history', label: '履歴' },
+    { key: 'question',  href: '/chat',        label: '質問'    },
+    { key: 'history',   href: '/history',     label: '履歴'    },
     { key: 'faq_admin', href: '/faqs/upload', label: 'FAQ管理' }
   ];
 
@@ -69,6 +69,7 @@
 
     return {
       links: links,
+      showLogin: !isLoggedIn,
       showUserInfo: isLoggedIn,
       showLogout: isLoggedIn,
       username: isLoggedIn ? currentUser.username : null,
@@ -91,17 +92,21 @@
   }
 
   function renderHeaderMenu(container, context) {
+    // 非活性リンクも <a> として描画し、準備中ページへ遷移できるようにする
     var linksHtml = context.links.map(function (link) {
-      if (link.active) {
-        return '<a class="hnm-link" href="' + link.href + '">' + escapeHtml(link.label) + '</a>';
-      }
-      return '<span class="hnm-link hnm-link-inactive" aria-disabled="true" tabindex="-1">' + escapeHtml(link.label) + '</span>';
+      var cls = 'hnm-link' + (link.active ? '' : ' hnm-link-inactive');
+      return '<a class="' + cls + '" href="' + link.href + '">' + escapeHtml(link.label) + '</a>';
     }).join('');
 
     var userInfoHtml = '';
     if (context.showUserInfo) {
       var roleLabel = ROLE_LABELS[context.role] || context.role;
       userInfoHtml = '<span class="hnm-user">' + escapeHtml(context.username) + '（' + escapeHtml(roleLabel) + '）</span>';
+    }
+
+    var loginHtml = '';
+    if (context.showLogin) {
+      loginHtml = '<a class="hnm-login" href="/login">ログイン</a>';
     }
 
     var logoutHtml = '';
@@ -113,7 +118,7 @@
       '<div class="hnm-inner">' +
         '<span class="hnm-title" role="presentation">HELPO</span>' +
         '<nav class="hnm-links">' + linksHtml + '</nav>' +
-        '<div class="hnm-account">' + userInfoHtml + logoutHtml + '</div>' +
+        '<div class="hnm-account">' + userInfoHtml + loginHtml + logoutHtml + '</div>' +
       '</div>';
   }
 
@@ -130,9 +135,12 @@
       '.hnm-links{display:flex;gap:16px;flex:1;flex-wrap:wrap;}' +
       '.hnm-link{color:#fff;font-size:14px;font-weight:600;text-decoration:none;opacity:0.95;}' +
       '.hnm-link:hover{text-decoration:underline;}' +
-      '.hnm-link-inactive{color:rgba(255,255,255,0.5);cursor:not-allowed;pointer-events:none;text-decoration:none;}' +
+      '.hnm-link-inactive{color:rgba(255,255,255,0.45);font-style:italic;}' +
+      '.hnm-link-inactive:hover{text-decoration:underline;}' +
       '.hnm-account{display:flex;align-items:center;gap:12px;}' +
       '.hnm-user{color:#fff;font-size:13px;opacity:0.9;white-space:nowrap;}' +
+      '.hnm-login{font-size:13px;font-weight:600;color:#2563eb;background:#fff;border-radius:6px;padding:6px 14px;text-decoration:none;}' +
+      '.hnm-login:hover{background:#e5e7eb;}' +
       '.hnm-logout{font-size:13px;font-weight:600;color:#2563eb;background:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;}' +
       '.hnm-logout:hover{background:#e5e7eb;}';
     document.head.appendChild(style);

@@ -1,72 +1,127 @@
 # Requirements Document
 
 ## Introduction
-HELPOは社内FAQ向けAIヘルプデスクの新規プロジェクトである。本仕様「helpo-foundation」は、後続の認証、FAQ管理・検索、AIチャットを安全かつ一貫して実装できるアプリケーション基盤を定義する。WindowsのGPUなしPC上で容易にセットアップでき、外部AIサービスへの依存を必須としない研修用MVPの出発点とする。
+HELPOは、社内FAQを根拠として社員の自己解決を支援するローカルAIヘルプデスクである。本仕様「helpo-foundation」は、WindowsのGPUなしPC上で各業務機能が乗る共通基盤を定義する。各業務機能の詳細な振る舞いは個別仕様が所有し、本仕様は起動・永続化・設定・共通画面・拡張接続点を提供する。また、基盤の接続点と拡張点を通じて認証、FAQ管理・検索、AIチャット、チャット履歴が組み合わさったとき、利用者が経験できる振る舞いも対象とする。
 
 ## Boundary Context
-- **In scope**: FastAPIアプリケーションの起動と実行、ファイルベースのローカル永続化、環境設定の読み込み、共通データアクセス primitives、基本Web画面構成、後続機能の拡張ポイント。
-- **Out of scope**: ユーザーログイン・認可、FAQの登録・更新・検索業務、Embedding生成・ベクトル検索、LLM連携・回答生成、質問・回答履歴。
-- **Adjacent expectations**: 後続仕様（local-user-authentication、faq-management-and-search、ai-helpdesk-chat）は、本仕様で定めるアプリケーション構成、設定管理、永続化方式、画面レイアウトを利用する。
+- **In scope**: Webアプリケーションの起動と実行、ファイルベースのローカル永続化、環境設定、共通データアクセス、共通画面構成、下流機能の拡張・接続。
+- **Out of scope**: 認証・認可ルール自体、FAQの業務ロジックと検索判定自体、AI回答生成自体、履歴の保存・所有判定自体。FAQの一覧・更新・削除、一般文書RAG、社員SSO、多要素認証、高度な権限制御、履歴の共有・出力・全利用者閲覧、利用分析、外部AIサービス、本番向け分散構成と高可用性も対象外とする。
+- **Adjacent expectations**: 認証機能は利用者IDと`user`・`admin`の基本ロールを提供し、基盤の永続化・設定・画面構成を利用する。FAQ管理・検索機能は管理者向けFAQ登録とローカル検索を提供し、基盤の永続化と拡張接続点を利用する。AIチャット機能はFAQを根拠とする回答と窓口案内を提供し、基盤の画面構成と拡張接続点を利用する。チャット履歴機能は本人所有の履歴を永続化・表示し、基盤の永続化と拡張接続点を利用する。
 
 ## Requirements
 
 ### Requirement 1: アプリケーションの起動と実行
-**Objective:** 開発者として、HELPO基盤を1つのコマンドで起動できるようにしたい。これにより、Windows PC上ですぐに動作確認ができる。
+**Objective:** 開発者として、HELPOを一つの起動操作で利用可能にしたい。これにより、Windows PC上ですぐに動作確認できる。
 
 #### Acceptance Criteria
-1. When 起動コマンドが実行されたとき、HELPO 基盤 shall start without errors and listen on the configured host and port.
-2. When 起動が完了したとき、HELPO 基盤 shall expose an HTTP endpoint reachable from the local browser.
+1. When 運用者が所定の起動操作を実行したとき、the HELPO基盤 shall 設定済みのホストとポートでWebアプリケーションを起動する。
+2. When 起動が完了したとき、the HELPO基盤 shall ローカルブラウザから到達可能な画面を提供する。
+3. If 起動に必要な設定またはローカル永続化を利用できない場合、the HELPO基盤 shall 利用者向け処理の受付を開始せず、運用者が原因を識別できる起動エラーを表示する。
 
 ### Requirement 2: 環境設定の読み込み
-**Objective:** 開発者・管理者として、データベースパスや実行モードなどの設定を外部ファイルや環境変数で管理したい。これにより、異なるPC間で再利用できる。
+**Objective:** 開発者・運用者として、実行環境ごとの設定をアプリケーション本体と分離して管理したい。これにより、異なるローカルPCでも同じHELPOを再利用できる。
 
 #### Acceptance Criteria
-1. When 設定ファイルまたは環境変数が提供されている場合、HELPO 基盤 shall load values at startup and make them available to downstream modules.
-2. If 設定ファイルが存在しない場合、HELPO 基盤 shall use safe default values suitable for local development.
-3. The HELPO 基盤 shall validate that required settings are present before the application starts serving requests.
+1. When 設定ファイルまたは環境変数が提供されたとき、the HELPO基盤 shall 起動時に設定値を読み込み、対象の下流機能が利用できる状態にする。
+2. If 任意設定が提供されていない場合、the HELPO基盤 shall ローカル研修環境向けの安全な既定値を適用する。
+3. If 必須設定が欠落している、または設定値が許容範囲外である場合、the HELPO基盤 shall リクエストの受付開始前に設定エラーとして拒否する。
+4. The HELPO基盤 shall 秘密情報を通常の画面、エラー応答、またはログへ表示しない。
 
-### Requirement 3: ローカル永続化の提供
-**Objective:** 開発者として、追加ミドルウェアをインストールせずにデータを保存できるようにしたい。これにより、Windows PC上で手軽にセットアップできる。
-
-#### Acceptance Criteria
-1. When the application starts, HELPO 基盤 shall initialize a local file-based embedded database using a configurable path.
-2. When スキーマの初期化または更新が必要な場合、HELPO 基盤 shall apply baseline schema migrations to the local database.
-3. The HELPO 基盤 shall keep all persistence operations within the project directory or a configurable local directory by default.
-
-### Requirement 4: 共通データアクセスの提供
-**Objective:** 後続機能の開発者として、データベース操作を統一された形で利用できるようにしたい。これにより、認証やFAQ機能の実装が重複しない。
+### Requirement 3: ローカル永続化
+**Objective:** 開発者として、追加のデータベースサービスなしで下流機能のデータを保持したい。これにより、Windows PC上で容易にセットアップできる。
 
 #### Acceptance Criteria
-1. When 下位モジュールがデータの読み書きを要求したとき、HELPO 基盤 shall provide a shared data access layer that handles connection and transaction lifecycle.
-2. While 下位モジュールがトランザクション内で複数の操作を実行している間、HELPO 基盤 shall ensure all operations commit or rollback together.
-3. The HELPO 基盤 shall expose common base models or types that downstream modules can extend for their own entities.
+1. When HELPOが初めて起動したとき、the HELPO基盤 shall 設定されたローカル保存先を初期化し、下流機能がデータを保存できる状態にする。
+2. When 保存構造の初期化または更新が必要なとき、the HELPO基盤 shall 適用済みデータを失わずに必要な更新を適用する。
+3. The HELPO基盤 shall 既定で全ての永続データをプロジェクト内または設定されたローカル保存先に保持する。
+4. While HELPOが正常に再起動した後、the HELPO基盤 shall 保存済みデータを下流機能から再利用可能な状態に保つ。
 
-### Requirement 5: 基本Web画面構成
-**Objective:** 利用者として、HELPOの各画面に共通のヘッダーやナビゲーションが表示されるようにしたい。これにより、ページ遷移後も場所がわかりやすくなる。
-
-#### Acceptance Criteria
-1. When ルートパスまたは指定されたトップページにアクセスしたとき、HELPO 基盤 shall render a base layout containing header, main content area, and footer placeholders.
-2. Where ナビゲーション用の仮リンクが配置されている場合、HELPO 基盤 shall display placeholders for future authentication, FAQ, and chat entry points without implementing their business logic.
-3. The HELPO 基盤 shall use a consistent CSS framework or styling convention for all served pages.
-
-### Requirement 6: ローカルAI実行設定の拡張ポイント
-**Objective:** 管理者として、将来的なローカルLLM・Embeddingモデルの設定を追加できるようにしたい。これにより、AIチャット機能が外部サービスに依存せず組み込める。
+### Requirement 4: 共通データ操作と整合性
+**Objective:** 下流機能の開発者として、共通の方法でデータを安全に読み書きしたい。これにより、複数機能にまたがる処理でも保存結果の不整合を避けられる。
 
 #### Acceptance Criteria
-1. Where local AI model paths or execution flags are provided in settings, HELPO 基盤 shall make those settings available to downstream AI modules.
-2. The HELPO 基盤 shall not require external AI service credentials or network connectivity for the application to start.
+1. When 下流機能がデータの読み書きを要求したとき、the HELPO基盤 shall 接続の開始から終了までを一貫して管理できる共通のデータ操作手段を提供する。
+2. While 一つの業務処理が複数の保存操作を実行している間、the HELPO基盤 shall 全ての操作を一括して確定するか、全てを確定前の状態へ戻す。
+3. If データ操作中に予期しない失敗が発生した場合、the HELPO基盤 shall 途中までの変更を確定せず、下流機能へ失敗を通知する。
+4. The HELPO基盤 shall 下流機能が利用者、FAQ、回答、および履歴を一意に関連付けられる共通の識別・日時表現を提供する。
 
-### Requirement 7: エラー報告とログ
-**Objective:** 開発者として、アプリケーションのエラーを適切に把握できるようにしたい。これにより、トラブルシューティングが効率化される。
-
-#### Acceptance Criteria
-1. When a startup error occurs, HELPO 基盤 shall output a clear error message describing the failure and exit without starting the server.
-2. When an unhandled runtime error occurs, HELPO 基盤 shall return an HTTP 500 response with a generic message and log the details for the developer.
-
-### Requirement 8: 研修用MVPとしての軽量性
-**Objective:** 研修参加者として、外部サービスやGPUを用意しなくてもHELPOを動かせるようにしたい。これにより、少人数での研修が円滑に進む。
+### Requirement 5: 共通画面構成と機能導線
+**Objective:** 利用者として、HELPOの各機能へ一貫した画面から移動したい。これにより、現在地と利用可能な操作を理解できる。
 
 #### Acceptance Criteria
-1. The HELPO 基盤 shall start and serve pages on a Windows PC without a GPU.
-2. The HELPO 基盤 shall not require external cloud services as mandatory dependencies.
-3. The HELPO 基盤 shall support single-user or small-team local usage without complex infrastructure setup.
+1. When 利用者がHELPOの画面を表示したとき、the HELPO基盤 shall サービス名、主要内容領域、および機能間を移動するための共通画面領域を表示する。
+2. When 対象機能が利用可能な状態であるとき、the HELPO基盤 shall ログイン、質問、履歴、およびFAQ登録の各画面へ到達できる実在する導線を表示する。
+3. While 一般利用者がログインしている間、the HELPO基盤 shall 管理者専用のFAQ登録操作を利用可能な操作として表示しない。
+4. While 管理者がログインしている間、the HELPO基盤 shall FAQ登録画面へ移動できる導線を表示する。
+5. If 未認証の利用者が認証必須の導線を指定した場合、the HELPO基盤 shall ログインを要求し、保護対象の画面内容を表示しない。
+6. The HELPO基盤 shall 全ての下流画面に一貫した表示規則を適用する。
+
+### Requirement 6: 下流機能の拡張と接続
+**Objective:** 下流機能の開発者として、共通基盤を個別に作り直さず機能をHELPOへ接続したい。これにより、各仕様を独立して開発・検証できる。
+
+#### Acceptance Criteria
+1. When 下流機能が画面または処理入口を登録したとき、the HELPO基盤 shall アプリケーションの再構築を要求せず、その入口をHELPOの一部として利用可能にする。
+2. When 下流機能が固有の設定を追加したとき、the HELPO基盤 shall 共通設定と衝突せずに読み込みと検証を行える接続点を提供する。
+3. When 下流機能が共通画面を利用したとき、the HELPO基盤 shall 機能固有の内容を共通画面内に表示できる接続点を提供する。
+4. If 一つの任意下流機能を利用できない場合、the HELPO基盤 shall 利用不能な機能を識別可能にし、無関係な基盤機能の起動可否と混同しない。
+
+### Requirement 7: 共通エラー応答とログ
+**Objective:** 利用者・運用者として、問題発生時に機密情報を漏らさず一貫した案内を受けたい。これにより、安全に原因調査できる。
+
+#### Acceptance Criteria
+1. If 処理中に未処理のエラーが発生した場合、the HELPO基盤 shall 内部詳細を含まない共通エラーメッセージを利用者へ返す。
+2. When 運用者がエラーを調査するとき、the HELPO基盤 shall 発生日時、対象処理、および調査に必要なエラー情報をローカルログで確認可能にする。
+3. The HELPO基盤 shall パスワード、セッション識別子、質問全文、回答全文、FAQ全文、および履歴全文を通常ログへ出力しない。
+4. If 下流機能が既知の利用者エラーまたは権限エラーを返した場合、the HELPO基盤 shall 未処理のシステムエラーへ置き換えず、区別可能な応答として利用者へ伝える。
+
+### Requirement 8: ローカルMVPとしての動作条件
+**Objective:** 研修参加者として、外部サービスやGPUを用意せずHELPOを利用したい。これにより、少人数の研修環境で容易に検証できる。
+
+#### Acceptance Criteria
+1. The HELPO基盤 shall GPUを搭載していないWindows PC上で起動し、基本画面を提供する。
+2. The HELPO基盤 shall 外部クラウドサービス、外部AIサービスの資格情報、または外部データベースを必須としない。
+3. While 一人または少人数がローカル環境を利用している間、the HELPO基盤 shall 複雑な分散インフラなしで各統合機能への要求を受け付ける。
+4. The HELPO基盤 shall 社内FAQ、質問、回答、および履歴を外部AIサービスへ送信しない統合構成を受け入れる。
+
+### Requirement 9: 認証後の機能横断的な利用
+**Objective:** 利用者として、一度のログインで自分の権限に応じたHELPO機能を利用したい。これにより、管理操作と本人向け操作を安全に使い分けられる。
+
+#### Acceptance Criteria
+1. When ローカル登録済み利用者がログインしたとき、the HELPO基盤 shall 再認証を求めることなく質問送信、FAQ管理、および履歴確認の各画面を利用できる状態にする。
+2. While 認証セッションが有効である間、the HELPO基盤 shall 画面を移動しても同一利用者として扱い、再ログインを求めない。
+3. When 利用者がログアウトしたとき、the HELPO基盤 shall 質問送信、FAQ管理、および履歴確認の各保護対象画面を利用できない状態にする。
+4. If 一般利用者が管理者専用のFAQ登録画面または処理へアクセスした場合、the HELPO基盤 shall 操作を拒否し、FAQが変更されない状態を保つ。
+5. The HELPO基盤 shall 社員SSO、多要素認証、または`user`・`admin`以外の権限体系を必須としない。
+
+### Requirement 10: FAQ登録と検索の連携
+**Objective:** 管理者・社員として、登録されたFAQを自然な質問から検索可能にしたい。これにより、社内FAQをAIチャットの根拠として利用できる。
+
+#### Acceptance Criteria
+1. When 管理者がFAQを登録したとき、the HELPO基盤 shall 登録後の質問でそのFAQが検索対象として見つかる状態にする。
+2. If 未認証の利用者または一般利用者がFAQ登録を要求した場合、the HELPO基盤 shall 操作を拒否し、FAQが変更されない状態を保つ。
+3. When 認証済み利用者が自然な言い回しで質問したとき、the HELPO基盤 shall 意味の近いFAQが見つかればチャットの回答にその内容が反映される状態にする。
+4. The HELPO基盤 shall FAQの保存と検索がローカル環境内で完結し、外部サービスへの送信を必要としない。
+5. The HELPO基盤 shall FAQの一覧、更新、および削除を必須機能として提供しない。
+
+### Requirement 11: FAQを根拠とするチャット回答
+**Objective:** 認証済み社員として、登録FAQに根拠を限定した回答または安全な窓口案内を受けたい。これにより、推測による誤案内を避けながら自己解決できる。
+
+#### Acceptance Criteria
+1. When 認証済み利用者が空白ではない質問を送信したとき、the HELPO基盤 shall 処理中の状態が表示され、最終的な回答または案内が同じ画面に届く状態にする。
+2. When 質問に十分に近いFAQが見つかった場合、the HELPO基盤 shall そのFAQの内容を根拠とした短い回答またはFAQ直接回答が画面に表示される状態にする。
+3. If 質問に十分に近いFAQがない場合、the HELPO基盤 shall 推測による回答を表示せず、人事・総務窓口への案内が表示される状態にする。
+4. If ローカルLLMが利用不能または時間内に応答しない場合、the HELPO基盤 shall 処理中のまま放置されず、FAQ直接回答または窓口案内が表示される状態にする。
+5. When 回答が表示されたとき、the HELPO基盤 shall 回答の根拠となったFAQを利用者が同じ画面で確認できる状態にする。
+6. The HELPO基盤 shall 一般文書、外部知識、または登録FAQと照合されていない情報を回答根拠としない。
+
+### Requirement 12: 本人チャット履歴の記録と確認
+**Objective:** 認証済み社員として、自分の過去の質問と回答を後から確認したい。これにより、同じ問い合わせを繰り返さず根拠を再確認できる。
+
+#### Acceptance Criteria
+1. When チャットで回答を受け取ったとき、the HELPO基盤 shall その質問・回答・根拠が自分の履歴として記録され、後から確認できる状態にする。
+2. When 認証済み利用者が履歴一覧を開いたとき、the HELPO基盤 shall 自分の履歴だけが表示され、他の利用者の履歴が含まれない状態にする。
+3. If 利用者が他の利用者の履歴を指定した場合、the HELPO基盤 shall その質問・回答・根拠が表示されない状態にする。
+4. While 利用者がログアウトした後またはHELPOが再起動した後、the HELPO基盤 shall 次回のログイン後も同じ履歴を確認できる状態に保つ。
+5. If 根拠FAQが回答後に変更または削除された場合、the HELPO基盤 shall 過去の履歴では回答時点の根拠内容が表示される状態にする。
+6. The HELPO基盤 shall 履歴の永続化と本人所有の判定をAIチャット機能の責務とせず、独立した履歴機能との接続として扱う。
+7. The HELPO基盤 shall 履歴の共有、出力、分析、または全利用者横断閲覧を提供しない。

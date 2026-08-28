@@ -35,6 +35,29 @@ def test_config_defaults():
     assert settings.debug is False
 
 
+def test_get_database_url():
+    settings = Settings()
+    assert settings.get_database_url() == settings.database_url
+
+
+def test_get_local_ai_settings_none_when_not_configured():
+    settings = Settings()
+    # 既定値は両パスとも None -> None を返す
+    assert settings.get_local_ai_settings() is None
+
+
+def test_get_local_ai_settings_returns_model_when_configured(monkeypatch):
+    monkeypatch.setenv("LOCAL_LLM_PATH", "/models/llm.gguf")
+    from app.config import Settings as FreshSettings
+    import importlib, app.config
+    importlib.reload(app.config)
+    from app.config import Settings as ReloadedSettings
+    s = ReloadedSettings()
+    result = s.get_local_ai_settings()
+    assert result is not None
+    assert result.llm_path == "/models/llm.gguf"
+
+
 def test_baseline_migration_creates_meta():
     DatabaseEngine.reset()
     os.environ["DATABASE_URL"] = "sqlite:///:memory:"
