@@ -1,0 +1,1 @@
+-- foundation baseline: マイグレーション追跡テーブルは MigrationRunner が管理します
