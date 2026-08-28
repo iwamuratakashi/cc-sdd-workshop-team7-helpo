@@ -234,13 +234,8 @@
 </head>
 <body>
 
-  <!-- ===== ヘッダー（WebLayout mock） ===== -->
-  <header class="header">
-    <div class="header-title">
-      <span>Helpo</span>
-      <span style="font-weight: 400; font-size: 14px; opacity: 0.8;">AI社内ヘルプデスク</span>
-    </div>
-  </header>
+  <!-- ===== ヘッダー（helpo-foundation WebLayout mock + header-navigation-menu） ===== -->
+  <header class="header" id="app-header"></header>
 
   <!-- ===== モックアップ状態切替コントロール ===== -->
   <div class="mockup-controls">
@@ -372,10 +367,13 @@
         return;
       }
 
-      // 認証成功: ai-helpdesk-chatのチャット機能モック画面へ遷移
+      // 認証成功: header-navigation-menu用にログイン状態を保存し、
+      // ai-helpdesk-chatのチャット機能モック画面へ遷移
+      window.HeaderNavigationMenu.setCurrentMockUser(username, user.role);
       elSubmitBtn.disabled = true;
       window.location.href = CHAT_MOCKUP_URL;
     }
   </script>
+  <script src="nav.js"></script>
 </body>
 </html>
