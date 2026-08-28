@@ -8,8 +8,8 @@
   - Windows CPU推論のhard timeoutには`spawn`プロセス境界が必要である。イベントループとDB `Session`を子プロセスへ渡さず、timeout時は要求取消後にworkerを破棄・再生成する。
   - runtime/modelは未選定とし、承認済み`ModelAdoptionManifest`とローカル設定・ファイルhashが一致するときだけ推論を有効化する。
   - 生成根拠制約はpromptだけでは保証できない。構造化source IDを生成結果に要求し、検証失敗時は決定的なFAQ直接回答へ退避する。
-  - SQLiteの`ON DELETE SET NULL`は全接続で`PRAGMA foreign_keys=ON`が保証される場合だけ成立するため、Foundation接続契約を起動時に検証する。
   - timeout時だけでなくapplication shutdown時にもworkerを取消・terminate・joinし、子processを残さないlifecycle契約が必要である。
+  - 永続化・履歴・snapshotはchat-history仕様へ分離され、ai-helpdesk-chatはDB table、migration、repositoryを所有しない。
   - 外部公式情報はこの実行環境からlive verificationできなかった。下記URLは調査候補として記録し、採用時に公式最新版を再確認する必要がある。
 
 ## Research Log
@@ -18,12 +18,27 @@
 - **Context**: Foundation、認証、FAQ検索の所有権を侵害せず統合する必要がある。
 - **Sources Consulted**: `.kiro/specs/helpo-foundation/{requirements,design,tasks}.md`、`.kiro/specs/local-user-authentication/{requirements,design,tasks}.md`、`.kiro/specs/faq-management-and-search/{requirements,design,tasks}.md`。
 - **Findings**:
-  - Foundation契約は`BaseEntity`、commitしない`BaseRepository`、`Session`、`MigrationRunner.apply_migrations`、`ErrorHandler`、`WebLayout`、`RouterRegistry`である。
-  - 認証契約は`CurrentUser`、`require_authenticated_user`、adminバイパスを持たない`require_owner`である。
+  - Foundation契約は`Session`/`get_db`、`ErrorHandler`、`WebLayout`、`RouterRegistry`、`ConfigManager`拡張点である。
+  - 認証契約は`CurrentUser`、`require_authenticated_user`である。本仕様では`require_owner`は使用しない（所有データなし）。
   - FAQ契約は`FaqSearchService.search(db, query, top_k=5)`、`FaqSearchResult(query,candidates,has_match)`、`FaqCandidate(faq_id,question,answer,confidence,is_match)`である。適合閾値はFAQ側の固定判断で、chat側に設定や再計算を置けない。
-  - featureは`app/chat`配下とfeatureテンプレート、`004` migrationを所有する。foundation所有の`config.py`、`dependencies.py`、`base.html`、`main.py`を変更せず、設定・router登録の拡張点を使う。
-  - migration順は`foundation baseline.sql` → `002` auth → `003` FAQ → `004` chatであり、foundationを`001`とは呼ばない。
-- **Implications**: 新規wrapperや共有設定変更を避け、上流型を直接注入する。古いfoundation health-check参照を設計へ持ち込まない。
+  - featureは`app/chat`配下とfeatureテンプレートを所有する。foundation所有の`config.py`、`dependencies.py`、`base.html`、`main.py`を変更せず、設定・router登録の拡張点を使う。
+  - Foundation設定にはすでに`local_llm_path`(optional)が存在し、chat feature settingsから参照可能である。
+- **Implications**: 新規wrapperや共有設定変更を避け、上流型を直接注入する。永続化層はchat-historyへ委譲し、本仕様にDB table/migrationを持たない。
+
+### 永続化・履歴のスコープ分離
+- **Context**: requirements.md改訂により、永続化・履歴・snapshotの責務がchat-history仕様へ移動した。
+- **Sources Consulted**: `requirements.md`（改訂版）、`.kiro/specs/chat-history/requirements.md`、`.kiro/steering/roadmap.md`。
+- **Findings**:
+  - 旧requirements 6（永続化・履歴）、7（FAQ更新・削除後の履歴保全）が削除され、旧requirement 8（運用安全性）がrequirement 6に繰り上がった。
+  - Boundary Contextが「質問・回答・状態・根拠の永続化と履歴表示はchat-historyが担う」と明示している。
+  - roadmap.mdでは`chat-history`が`ai-helpdesk-chat`に依存する独立仕様として定義されている。
+  - chat-history仕様はrequirements-generated段階であり、ai-helpdesk-chatが返す`ChatAnswerResponse`を永続化契約の入力として利用する設計が想定される。
+- **Implications**:
+  - `ChatHistoryRepository`、`ChatHistory`、`ChatSourceSnapshot`モデル、`004_ai_helpdesk_chat.sql` migration、履歴endpoint、履歴テンプレート（`history.html`、`detail.html`）を設計から除去する。
+  - `ChatService`はstatelessとなり、DB書き込みを行わない。`db: Session`はFAQ検索のために受け取るが、永続化には使用しない。
+  - 冪等性の`request_id`とDB unique制約は不要となり、重複抑止は1.6のクライアント側button disableで充足する。
+  - `ChatAnswerResponse`を型付きDTOとして明確に定義し、chat-historyが利用可能な契約とする。
+  - `require_owner`依存を除去する（所有データがないため）。
 
 ### Windows spawn workerとhard timeout
 - **Context**: 同期CPU推論がFastAPI event loopを塞がず、timeout後にCPU使用が収束しなければならない。
@@ -31,7 +46,7 @@
 - **Findings**:
   - Windowsの子プロセスは`spawn`前提で、引数は直列化可能なplain dataに限定すべきである。
   - futureの待機取消だけではnative推論を停止できない。queue待機・prompt構築・生成を一つのdeadlineで覆い、取消通知、短いgrace、残存時terminate/joinの順でworkerを破棄する必要がある。
-  - FastAPI event loop、request、dependency、SQLAlchemy `Session`をworkerへ渡さない。親でFAQ検索と永続化を行い、workerには文字列・source ID・数値制限のみを渡す。
+  - FastAPI event loop、request、dependency、SQLAlchemy `Session`をworkerへ渡さない。親でFAQ検索を行い、workerには文字列・source ID・数値制限のみを渡す。
   - MVP同時生成数は1。timeout後のworker instanceは再利用せずclean processを遅延再生成する。
 - **Implications**: `LocalLlmWorker`をプロセス境界、`LocalLlmAdapter`を親側deadline/生存期間管理境界とする。max output tokensとcharsを両方強制する。
 
@@ -62,22 +77,11 @@
   - 意味的groundingの完全判定はできないため、検証失敗時は登録済み回答をそのまま返す方が安全である。
 - **Implications**: fallbackは適合候補を`confidence DESC, faq_id ASC`で並べた先頭とする。HTMLはJinja autoescape/テキスト挿入を維持する。
 
-### 冪等送信、履歴、snapshot
-- **Context**: UI二重クリック抑止だけではretryや複数tabによる重複保存を防げない。
-- **Sources Consulted**: SQLite UNIQUE constraints https://www.sqlite.org/lang_createtable.html 、SQLite foreign keys https://www.sqlite.org/foreignkeys.html 。本環境ではlive verification未実施。
-- **Findings**:
-  - client生成UUID `request_id`と`UNIQUE(owner_user_id, request_id)`を永続化境界に置くと利用者間の衝突なく冪等化できる。
-  - 同じkeyの再要求は既存のpersisted resultを返し、二行目を作らない。MVPは同期APIのため、同時競合で既存行がまだ取得不能なら短い再読後409として再試行可能にし、別生成を開始しない。
-  - SQLiteには単純な`limit/offset`が十分であり、`created_at DESC, id DESC`で安定順序にする。
-  - FAQ FKはnullable `ON DELETE SET NULL`、`faq_id_at_answer`とquestion/answer/confidence snapshotは不変である。`BaseEntity.updated_at`があってもsnapshot rowは更新しない。
-  - SQLiteの外部キー制約は接続ごとの`PRAGMA foreign_keys=ON`が前提である。migration接続だけでなく通常Sessionの全接続でFoundationが有効化し、chat起動時に検証する必要がある。
-- **Implications**: 生成結果と全snapshotを一transactionで保存し、失敗時はrollbackする。FK enforcementが無効ならchatをfail-fastで起動不能にし、Foundationの接続所有権をchat側で迂回しない。
-
 ## Architecture Pattern Evaluation
 
 | Option | Description | Strengths | Risks / Limitations | Notes |
 |--------|-------------|-----------|---------------------|-------|
-| feature-based monolith + process adapter | 既存FastAPI内でchatを構成し推論だけspawn workerへ隔離 | 上流整合、DB一貫性、hard timeout | worker lifecycle検証が必要 | 採用 |
+| feature-based monolith + process adapter | 既存FastAPI内でchatを構成し推論だけspawn workerへ隔離 | 上流整合、hard timeout | worker lifecycle検証が必要 | 採用 |
 | `FaqSearchPort` wrapper | 上流serviceを薄く包む | mock差替え | 単一実装を重複抽象化 | 却下、直接注入 |
 | process内推論 | 同一workerでnative runtimeを実行 | 単純 | event loop占有、停止不能 | 却下 |
 | 外部LLM API | cloud生成 | 運用容易 | 情報外部送信、offline不可 | 却下 |
@@ -118,18 +122,18 @@
 - **Trade-offs**: 意味的逸脱を完全検知はできない。
 - **Follow-up**: malicious question/FAQ、未知source ID、parse failureをtest fixture化する。
 
-### Decision: DB制約を冪等性のauthorityとする
-- **Context**: 1.5の重複抑止はclient stateだけでは不足する。
-- **Alternatives Considered**: button disable、process memory cache、DB unique key。
-- **Selected Approach**: client UUIDと`UNIQUE(owner_user_id, request_id)`を用い、既存persisted resultを再利用する。
-- **Rationale**: 再起動・複数process・HTTP retryにも一貫する。
-- **Trade-offs**: 同時in-flight競合時の409再試行契約が必要。
-- **Follow-up**: 同時POSTと同一UUID再送をintegration testする。
+### Decision: 永続化をchat-historyへ分離し、stateless chatとする
+- **Context**: requirements.md改訂により永続化・履歴の責務がchat-history仕様へ移動した。
+- **Alternatives Considered**: ai-helpdesk-chat内で永続化を所有、chat-historyへ分離。
+- **Selected Approach**: ai-helpdesk-chatはstatelessな回答生成に集中し、`ChatAnswerResponse`を型付き契約として公開する。chat-historyがこのDTOを受け取り永続化する。
+- **Rationale**: 回答生成ロジックと履歴管理の独立した進化を可能にする（roadmap.mdの分離方針に合致）。
+- **Trade-offs**: 重複抑止はクライアント側button disableのみとなり、server-side idempotencyはchat-historyが担う。
+- **Follow-up**: chat-history設計時にChatAnswerResponseの契約安定性を確認する。
 
 ### Decision: build-vs-adoptとsimplification
 - **Context**: 最小MVPを維持する。
 - **Alternatives Considered**: 推論engine自作、既存runtime採用、会話履歴、queue、多言語、configurable threshold。
-- **Selected Approach**: 推論runtimeは採用ゲート後にadoptし、業務固有adapter/policyだけbuildする。会話履歴投入、tools、network、streaming、queue、多言語subsystem、FAQ threshold設定を作らない。窓口案内は検証済みlocal plain textとする。
+- **Selected Approach**: 推論runtimeは採用ゲート後にadoptし、業務固有adapter/policyだけbuildする。永続化、会話履歴投入、tools、network、streaming、queue、多言語subsystem、FAQ threshold設定を作らない。窓口案内は検証済みlocal plain textとする。
 - **Rationale**: 現要求を満たす最小の責任境界である。
 - **Trade-offs**: MVPは同時生成1、単発質問、日本語UIに限定される。
 - **Follow-up**: 負荷要件が変わった場合のみarchitectureを再評価する。
@@ -138,12 +142,8 @@
 - Prompt injection/根拠外生成 — instruction/data分離、許可ID schema検証、登録回答fallback、HTML escape。
 - timeout後のnative処理残存 — grace後terminate/join、worker破棄、Windows実機でCPU収束証跡。
 - application shutdown後の子process残存 — feature lifecycleで受付停止、取消、grace、terminate/joinを実施する。
-- SQLite外部キー無効化によるsnapshot参照不整合 — 全接続の`PRAGMA foreign_keys=ON`をFoundation契約と起動検証で保証する。
 - artifact差替え・license drift — manifest hash照合、`approved` gate、変更時fresh official verification。
-- duplicate生成/履歴 — owner scoped UUID unique constraint、既存結果再利用、in-flight競合で二重生成禁止。
-- FAQ更新削除による履歴変質 — nullable FK `ON DELETE SET NULL`と不変snapshot。
-- 所有者漏えい — owner絞込み一覧、admin bypassなし`require_owner`、本文をlogしない。
-- SQLite競合/部分保存 — 推論をtransaction外で行い、回答とsnapshotのみ短い単一transactionで保存・rollback。
+- chat-historyとの契約ドリフト — ChatAnswerResponseの型定義を安定させ、変更時にrevalidation triggerとする。
 - 外部情報の鮮度 — 本調査ではlive verification不能と明記し、採用manifest承認前に公式URLを再確認する。
 
 ## References
@@ -155,6 +155,6 @@
 - [ONNX Runtime GenAI](https://github.com/microsoft/onnxruntime-genai) / [docs](https://onnxruntime.ai/docs/genai/) — 条件付き候補。
 - [OWASP Prompt Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html) — untrusted prompt data対策。
 - [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/) — 構造化出力境界。
-- [SQLite CREATE TABLE](https://www.sqlite.org/lang_createtable.html) / [Foreign Keys](https://www.sqlite.org/foreignkeys.html) — unique/FK制約。
 - [SPDX License List](https://spdx.org/licenses/) — license識別候補。
 - `.kiro/specs/helpo-foundation/design.md`、`.kiro/specs/local-user-authentication/design.md`、`.kiro/specs/faq-management-and-search/design.md` — 正規上流契約。
+- `.kiro/specs/chat-history/requirements.md` — 下流永続化仕様の要件。

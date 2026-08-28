@@ -1,19 +1,19 @@
 # Design Document
 
 ## Overview
-ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする短い回答、決定的な安全fallback、根拠表示、本人限定履歴を提供する。既存のfeature-based FastAPI monolithへ`app/chat` featureとして追加し、`FaqSearchService.search(db, query, top_k=5)`の適合判断を変更せず利用する。
+ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする短い回答、決定的な安全fallback、根拠FAQ表示を提供する。既存のfeature-based FastAPI monolithへ`app/chat` featureとして追加し、`FaqSearchService.search(db, query, top_k=5)`の適合判断を変更せず利用する。
 
-FAQ検索と永続化はWeb process、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。
+FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。質問・回答・状態・根拠の永続化と履歴表示はchat-historyが担い、本仕様のスコープ外である。
 
 ### Goals
 - `is_match=true`のFAQだけに根拠を限定し、`AI回答`・`FAQ直接回答`・`該当FAQなし`・`AI利用不可`・`サーバエラー`のいずれかへ必ず収束する。
-- timeout時に推論processとCPU負荷を停止させ、同一`request_id`の履歴を一件に保つ。
-- FAQ変更・削除後も回答時点の根拠を本人だけが再現できる。
+- timeout時に推論processとCPU負荷を停止させる。
 - offline、CPU-only、no-auto-downloadを採用記録とruntime境界で強制する。
 
 ### Non-Goals
 - FAQ CRUD、Embedding、索引、適合閾値・`is_match`判断の実装または設定化。
 - 認証、session、role、管理者横断履歴の実装。
+- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示（chat-historyが担う）。
 - 会話履歴を使う生成、tools、外部知識、外部AI、streaming、非同期job、多言語subsystem。
 - runtime/modelの現時点での選定、model取得、repo ID/URL/network clientの提供。
 
@@ -22,37 +22,38 @@ FAQ検索と永続化はWeb process、CPU生成だけはWindows `spawn`の分離
 ### This Spec Owns
 - 質問受付、FAQ検索呼出、根拠選択、生成検証、fallback、回答状態遷移。
 - `LocalLlmAdapter`、`LocalLlmWorker`、`ModelAdoptionManifest`検証とworker lifecycle。
-- `chat_history`、`chat_source_snapshot`、冪等送信、本人履歴API/UI。
-- feature-local `ChatSettings`、router、template、`004_ai_helpdesk_chat.sql`。
+- feature-local `ChatSettings`、router、template。
+- 回答結果の型付きDTO（`ChatAnswerResponse`、`ChatSourceResponse`）。chat-historyはこのDTOを永続化契約の入力として利用する。
 
 ### Out of Boundary
 - Foundation所有の`app/config.py`、`app/dependencies.py`、`app/templates/base.html`、`app/main.py`は変更しない。
-- Foundationの`BaseEntity`、`BaseRepository`、`Session`、`MigrationRunner`、`ErrorHandler`、`WebLayout`、`RouterRegistry`を再実装しない。
-- Authの`CurrentUser`、`require_authenticated_user`、admin-bypass-free `require_owner`を変更しない。
+- Foundationの`Session`、`ErrorHandler`、`WebLayout`、`RouterRegistry`を再実装しない。
+- Authの`CurrentUser`、`require_authenticated_user`を変更しない。
 - FAQのdata、検索、固定relevance decision、`confidence`、`is_match`を再計算しない。
+- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示はchat-historyが担い、本仕様にDB table、migration、repositoryを含めない。
 - requirements.md、tasks.md、roadmap、上流specを変更しない。
 
 ### Allowed Dependencies
-- **Foundation**: `BaseEntity`、commitしない`BaseRepository`、`Session`/`get_db`、`MigrationRunner.apply_migrations`、`ErrorHandler`、`WebLayout`、`RouterRegistry`、feature設定拡張点。
-- **Auth**: `CurrentUser(id: int, username: str, role: Literal["user","admin"])`、`require_authenticated_user`、`require_owner(current, owner_user_id)`。admin例外は禁止する。
+- **Foundation**: `Session`/`get_db`、`ErrorHandler`、`WebLayout`、`RouterRegistry`、feature設定拡張点。
+- **Auth**: `CurrentUser(id: int, username: str, role: Literal["user","admin"])`、`require_authenticated_user`。
 - **FAQ**: `FaqSearchService.search(db: Session, query: str, top_k: int = 5) -> FaqSearchResult`、`FaqSearchResult(query,candidates,has_match)`、`FaqCandidate(faq_id,question,answer,confidence,is_match)`。
-- Python 3.10+、FastAPI 0.115+、SQLAlchemy 2.x、Pydantic v2、Jinja2、SQLite、および採用gate通過後のローカルCPU runtime。
-- 依存方向は upstream contracts → chat schemas/settings/models → repository/grounding/LLM adapter → ChatService → router/UI。上流からchatへのimportは禁止する。
+- Python 3.10+、FastAPI 0.115+、Pydantic v2、Jinja2、および採用gate通過後のローカルCPU runtime。
+- 依存方向は upstream contracts → chat schemas/settings → grounding/LLM adapter → ChatService → router/UI。上流からchatへのimportは禁止する。
 
 ### Revalidation Triggers
-- 上流型、認証の401/403、admin bypass、FAQ適合意味論、Foundation拡張点の変更。
-- FAQ ID型・削除方式、BaseEntity/BaseRepository/Session/MigrationRunner契約の変更。
+- 上流型、認証の401/403、FAQ適合意味論、Foundation拡張点の変更。
+- FAQ ID型、FaqSearchService契約の変更。
 - runtime/model/tokenizer/template/license/artifact、worker停止方式、Windows spawn前提の変更。
-- FoundationのSQLite接続で`PRAGMA foreign_keys=ON`を接続ごとに保証できない変更。
-- 同時生成数、複数Web process、履歴pagination、要求/応答schemaの変更。
+- 同時生成数、要求/応答schemaの変更。
+- chat-historyとの永続化契約の追加または変更。
 
 ## Architecture
 
 ### Existing Architecture Analysis
-- feature-based monolithと呼出側transactionを維持する。Repositoryはcommitせず、`ChatService`が保存transactionを完結する。
+- feature-based monolithを維持する。本仕様はDB書き込みを持たず、FAQ検索のために`Session`を利用する。
 - `FaqSearchService`は単一の上流実装を直接注入する。値を追加しない`FaqSearchPort`は置かない。
 - HTMLは`WebLayout`を継承し、routerは`RouterRegistry`、設定はfeature拡張点で登録する。
-- 未知例外はrollback後にFoundation `ErrorHandler`へ委譲する。staleなfoundation health-check依存は設けない。
+- 未知例外はFoundation `ErrorHandler`へ委譲する。
 
 ### Architecture Pattern & Boundary Map
 
@@ -65,9 +66,7 @@ graph TB
     ChatUI --> WebLayout
     ChatService --> FaqSearchService
     ChatService --> GroundingPolicy
-    ChatService --> ChatRepository
     ChatService --> LocalLlmAdapter
-    ChatRepository --> FoundationPersistence
     LocalLlmAdapter --> ManifestValidator
     LocalLlmAdapter --> LocalLlmWorker
     LocalLlmWorker --> LocalArtifacts
@@ -75,18 +74,17 @@ graph TB
 ```
 
 **Architecture Integration**:
-- Selected pattern: monolith内orchestration + process-isolated runtime adapter。DB整合性は既存processに残し、停止不能なnative推論だけ隔離する。
-- Existing patterns preserved: feature-local所有、上流service直接利用、typed DTO、Foundation transaction/error/layout/router拡張。
+- Selected pattern: monolith内orchestration + process-isolated runtime adapter。停止不能なnative推論だけ隔離する。
+- Existing patterns preserved: feature-local所有、上流service直接利用、typed DTO、Foundation error/layout/router拡張。
 - New boundaries: workerはplain generation payload/resultだけを受ける。FastAPI event loop、request、dependency、DB `Session`はworkerへ入らない。
-- Simplification: 会話、tool、queue、retry、threshold設定、検索wrapperを導入しない。MVP同時生成数は1である。
+- Simplification: 永続化、履歴、会話、tool、queue、retry、threshold設定、検索wrapperを導入しない。MVP同時生成数は1である。
 
 ### Technology Stack
 
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
-| UI | Jinja2 / vanilla JS | 質問、処理中、回答、履歴 | text autoescape、button disableは補助 |
+| UI | Jinja2 / vanilla JS | 質問、処理中、回答、根拠表示 | text autoescape、button disableは補助 |
 | Backend | Python 3.10+ / FastAPI 0.115+ / Pydantic v2 | API、型検証、orchestration | 上流stack準拠 |
-| Data | SQLAlchemy 2.x / SQLite | 履歴、snapshot、unique idempotency | 共通`Session` |
 | Runtime | Windows spawn / 採用gate通過CPU runtime | 同時1のローカル生成 | runtime/model未指定 |
 
 ## File Structure Plan
@@ -100,35 +98,27 @@ helpo/
 │   │   ├── __init__.py
 │   │   ├── settings.py              # ChatSettings、ModelAdoptionManifest、ManifestValidator
 │   │   ├── schemas.py               # API DTO、status、worker payload/result
-│   │   ├── models.py                # ChatHistoryとChatSourceSnapshot
-│   │   ├── repositories.py          # owner scoped履歴と原子保存
 │   │   ├── grounding.py             # source選択、prompt data、出力検証
 │   │   ├── llm_worker.py            # spawn子process内runtime境界
 │   │   ├── llm.py                   # adapter、manifest照合、deadline、worker破棄
-│   │   ├── services.py              # ChatService状態遷移とtransaction
+│   │   ├── services.py              # ChatService状態遷移
 │   │   ├── dependencies.py          # feature-local service lifecycle
 │   │   └── router.py                # APIとHTML route、RouterRegistry公開
 │   └── templates/chat/
-│       ├── index.html               # chat UIとclient UUID
-│       ├── history.html             # owner履歴一覧
-│       └── detail.html              # snapshot詳細
-├── migrations/
-│   └── 004_ai_helpdesk_chat.sql     # chat table、FK、index、unique制約
+│       └── index.html               # chat UIとclient重複抑止
 └── tests/
     ├── chat/test_grounding.py
     ├── chat/test_service.py
     ├── chat/test_llm_process.py
-    ├── chat/test_repository.py
-    ├── chat/test_api.py
-    └── chat/test_windows_adoption.py
+    └── chat/test_api.py
 ```
 
 ### Modified Files
-- `app/chat/*`と`app/templates/chat/*` — feature実装。既存時はmergeし責任を維持する。
-- `migrations/004_ai_helpdesk_chat.sql` — `003`後のchat schema。
+- `app/chat/*`と`app/templates/chat/*` — feature実装。
 - `tests/chat/*` — acceptance criteriaとWindows採用証跡。
 - router/configはFoundationの登録extensionをfeature側から利用する。`config.py`、`dependencies.py`、`base.html`、`main.py`は変更対象ではない。
 - runtime依存のlockfile変更はmanifest承認後の実装taskに限定し、本設計ではruntime名を固定しない。
+- DB table、migration fileは本仕様に含めない（chat-historyが担う）。
 
 ## System Flows
 
@@ -139,32 +129,33 @@ sequenceDiagram
     participant Client
     participant Router
     participant Service
-    participant Repository
     participant Search
     participant Adapter
     participant Worker
-    Client->>Router: request id and question
+    Client->>Router: question
     Router->>Service: authenticated ask
-    Service->>Repository: find owner and request id
-    alt persisted result exists
-        Repository-->>Service: existing result
-    else new request
-        Service->>Search: search top k five
-        Search-->>Service: typed result
-        alt search failed or no match
-            Service->>Repository: save guidance and no sources
-        else matched sources
+    Service->>Search: search top k five
+    Search-->>Service: typed result
+    alt search failed
+        Service-->>Router: server error response
+    else no match and LLM ready
+        Service-->>Router: no match response
+    else no match and LLM not ready
+        Service-->>Router: ai unavailable response
+    else matched sources
+        alt LLM not ready
+            Service-->>Router: direct faq response
+        else LLM ready
             Service->>Adapter: generate with deadline
             Adapter->>Worker: plain prompt data and limits
             alt valid structured result
                 Worker-->>Adapter: answer and source ids
-                Service->>Repository: save generated and cited snapshots
+                Service-->>Router: ai answer response
             else unavailable timeout or invalid
-                Service->>Repository: save direct answer and top snapshot
+                Service-->>Router: direct faq response
             end
         end
     end
-    Service-->>Router: persisted response
     Router-->>Client: answer response
 ```
 
@@ -186,27 +177,26 @@ sequenceDiagram
 | 質問内容がFAQに存在しない＋LLM利用可能 | `no_match`（該当FAQなし） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
 | 質問内容がFAQに存在しない＋LLM利用不可 | `ai_unavailable`（AI利用不可） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
 | FAQ検索機能が利用不能・予期しないエラー | `server_error`（サーバエラー） | 共通エラーメッセージを返す | サーバエラーメッセージ（内部詳細なし） |
-| 0文字（空または空白のみ）の入力 | （非保存）空入力エラー | 処理・保存なしで入力エラーを返す | 「質問を入力してください」、入力内容を保持 |
-| 401文字以上の入力 | （非保存）文字数超過エラー | 処理・保存なしで入力エラーを返す | 「質問は400文字以内で入力してください」、入力内容を保持 |
+| 0文字（空または空白のみ）の入力 | （クライアント側）空入力エラー | 処理なしで入力エラーを返す | 「質問を入力してください」、入力内容を保持 |
+| 401文字以上の入力 | （クライアント側）文字数超過エラー | 処理なしで入力エラーを返す | 「質問は400文字以内で入力してください」、入力内容を保持 |
 | 未認証アクセス（チャット画面） | - | 認証ページへ303リダイレクト | エラーメッセージなし（リダイレクト） |
 | 未認証アクセス（API） | - | JSON 401を返す | 本文なし |
-| 他人の履歴へのアクセス（管理者含む） | - | 403 Forbiddenを返す | エラーメッセージ |
 
 #### 境界値
 
 | 入力文字数（trim後） | ふるまい |
 |---------------------|---------|
-| 0字 | 入力エラーメッセージを表示（処理・保存なし） |
+| 0字 | 入力エラーメッセージを表示（処理なし） |
 | 1字〜400字 | FAQ検索・回答生成を実行し結果を表示 |
-| 401字以上 | 入力エラーメッセージを表示（処理・保存なし） |
+| 401字以上 | 入力エラーメッセージを表示（処理なし） |
 
 ### 状態flow
 
 ```mermaid
 flowchart TD
-    Accepted --> ExistingCheck
-    ExistingCheck --> ExistingResult
-    ExistingCheck --> Search
+    Received --> Validate
+    Validate --> InputError
+    Validate --> Search
     Search --> ServerError
     Search --> NoMatch
     Search --> Matched
@@ -216,29 +206,24 @@ flowchart TD
     Matched --> LlmAvailCheck
     LlmAvailCheck --> DirectFaq
     LlmAvailCheck --> Generation
-    Generation --> Timeout[Timeout]
+    Generation --> Timeout
     Timeout --> DirectFaq
     Generation --> InvalidOutput
-    Generation --> AiAnswer
     InvalidOutput --> DirectFaq
-    ServerError --> Persist
-    NoMatchStatus --> Persist
-    AiUnavailable --> Persist
-    DirectFaq --> Persist
-    AiAnswer --> Persist
+    Generation --> AiAnswer
 ```
 
-| Status | カテゴリ | Deterministic condition | Stored answer | Stored sources |
-|--------|---------|-------------------------|---------------|----------------|
-| `ai_answer` | 成功 | structured outputがparse、length、許可ID検証を通過 | 検証済み生成`answer` | 出力`source_ids`が指す実使用snapshotのみ、入力順 |
+| Status | カテゴリ | Deterministic condition | Answer content | Sources |
+|--------|---------|-------------------------|----------------|---------|
+| `ai_answer` | 成功 | structured outputがparse、length、許可ID検証を通過 | 検証済み生成`answer` | 出力`source_ids`が指す実使用candidateのみ、入力順 |
 | `direct_faq` | 成功 | LLM利用不能、timeout、または生成結果が空・不正・too long・parse不能・未知IDであり適合候補が存在 | 直接fallback候補の登録`answer` | fallback候補1件 |
 | `no_match` | 成功 | `has_match=false`または適合候補0であり、LLMが利用可能 | 検証済み窓口案内 | 0件 |
 | `ai_unavailable` | エラー | LLMが利用不能（manifest不一致、未設定、load失敗、停止）であり適合候補も存在しない | 検証済み窓口案内 | 0件 |
-| `server_error` | エラー | FAQ検索の既知利用不能・失敗、または予期しない処理エラー | 検証済み窓口案内 | 0件 |
+| `server_error` | エラー | FAQ検索の既知利用不能・失敗、または予期しない処理エラー | 共通エラーメッセージ | 0件 |
 
 - fallback候補は常に`confidence DESC, faq_id ASC`先頭の`is_match=true`候補である。検索成功後に適合候補があるため、LLM障害時に窓口案内へ分岐せず`direct_faq`へ収束する。
 - `no_match`と`ai_unavailable`は利用者へ同じ窓口案内を表示するが、statusでLLM可用性を区別し運用監視に活用する。
-- 入力バリデーションエラー（空入力エラー、文字数超過エラー）は回答処理・履歴保存を行わないため、persisted statusには含まない。クライアント側即時フィードバックとサーバー側422応答で処理する。
+- 入力バリデーションエラー（空入力エラー、文字数超過エラー）は回答処理を行わないため、API statusには含まない。クライアント側即時フィードバックとサーバー側422応答で処理する。
 
 ### worker lifecycle
 
@@ -256,25 +241,16 @@ stateDiagram-v2
     Discarded --> NotReady: recreation fails
 ```
 
-### Entity relationships
-
-```mermaid
-erDiagram
-    USER ||--o{ CHAT_HISTORY : owns
-    CHAT_HISTORY ||--o{ CHAT_SOURCE_SNAPSHOT : contains
-    FAQ o|--o{ CHAT_SOURCE_SNAPSHOT : current_reference
-```
-
 ## Requirements Traceability
 
 | Requirement | Summary | Components | Interfaces | Flows |
 |-------------|---------|------------|------------|-------|
-| 1.1 | 質問受付と処理表示 | ChatRouter, ChatUI, ChatService | API, State | 生成sequence |
+| 1.1 | 質問受付と処理表示 | ChatRouter, ChatUI, ChatService | API | 生成sequence |
 | 1.2 | 同画面の最終結果 | ChatUI, ChatService | API | 状態flow |
-| 1.3 | 空入力拒否・保存なし | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
-| 1.4 | 文字数超過拒否・保存なし | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
-| 1.5 | 未認証保護 | ChatRouter, Auth | API | owner access |
-| 1.6 | 重複抑止 | ChatUI, ChatService, Repository | API, State | ExistingCheck |
+| 1.3 | 空入力拒否 | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
+| 1.4 | 文字数超過拒否 | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
+| 1.5 | 未認証保護 | ChatRouter, Auth | API | - |
+| 1.6 | 重複抑止 | ChatUI | State | 生成sequence |
 | 2.1 | FAQ typed result利用 | ChatService, FaqSearchService | Service | 生成sequence |
 | 2.2 | 適合候補限定 | GroundingPolicy | Service | 状態flow |
 | 2.3 | 適合なしは該当FAQなし | ChatService | Service | 状態flow |
@@ -289,42 +265,30 @@ erDiagram
 | 4.2 | timeout→FAQ直接回答 | Adapter, Worker | Service | worker lifecycle |
 | 4.3 | LLM不能＋適合なし→AI利用不可 | ChatService | Service | 状態flow |
 | 4.4 | 検索不能・予期しないエラー→サーバエラー | ChatService, ErrorHandler | Service | 状態flow |
-| 4.5 | 7種の回答状態パターン定義 | ChatStatus, Repository, UI | API, State | 状態flow |
-| 5.1 | 根拠全項目表示 | ChatSourceResponse, UI | API | detail |
-| 5.2 | 実使用FAQだけ表示 | GroundingPolicy, Repository | State | 生成sequence |
-| 5.3 | 窓口案内は根拠なし | ChatAnswerResponse, UI | API | 状態flow |
-| 5.4 | 保存snapshot再現 | HistoryDetailResponse, Repository | API | detail |
-| 6.1 | 原子的履歴保存 | Repository, Models | State | 生成sequence |
-| 6.2 | owner一覧 | Repository, ChatRouter | API | owner access |
-| 6.3 | owner詳細 | Repository, ChatRouter | API | owner access |
-| 6.4 | admin含む他人拒否 | require_owner, ChatRouter | API | owner access |
-| 6.5 | logout・再起動後保持 | SQLite, Repository | State | detail |
-| 6.6 | 共有等を非提供 | ChatRouter | API | owner access |
-| 7.1 | 回答時snapshot | ChatSourceSnapshot | State | 生成sequence |
-| 7.2 | FAQ更新後不変 | Repository | State | detail |
-| 7.3 | FAQ削除後保持表示 | Models, UI | API, State | ER |
-| 7.4 | FAQ lifecycle非所有 | Migration | State | ER |
-| 8.1 | network/GPU不要 | Adapter, ManifestValidator | Service | worker境界 |
-| 8.2 | local設定検証 | ChatSettings | State | startup |
-| 8.3 | CPU負荷下収束 | Adapter, Worker | Service | worker lifecycle |
-| 8.4 | sensitive log禁止 | ChatService, Adapter | Service | 全flow |
-| 8.5 | 変更時再検証 | ModelAdoptionManifest | State | worker lifecycle |
+| 4.5 | 7種の回答状態パターン定義 | ChatStatus, ChatUI | API, State | 状態flow |
+| 5.1 | 根拠全項目表示 | ChatSourceResponse, ChatUI | API | 画面仕様 |
+| 5.2 | 実使用FAQだけ表示 | GroundingPolicy | State | 生成sequence |
+| 5.3 | 窓口案内は根拠なし | ChatAnswerResponse, ChatUI | API | 状態flow |
+| 6.1 | network/GPU不要 | Adapter, ManifestValidator | Service | worker境界 |
+| 6.2 | local設定検証 | ChatSettings | State | startup |
+| 6.3 | CPU負荷下収束 | Adapter, Worker | Service | worker lifecycle |
+| 6.4 | sensitive log禁止 | ChatService, Adapter | Service | 全flow |
+| 6.5 | 変更時再検証 | ModelAdoptionManifest | State | worker lifecycle |
 
 ## Components and Interfaces
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
-| ChatSettings | Config | local制限と窓口文 | 1.3, 1.4, 3.3, 4.2, 8.2 | Foundation config extension (Inbound/External P0) | State |
-| ManifestValidator | Runtime gate | 採用証跡とhash照合 | 3.2-3.4, 8.1, 8.5 | ChatSettings (Inbound P0), local artifact files (External P0) | Service, State |
+| ChatSettings | Config | local制限と窓口文 | 1.3, 1.4, 3.3, 4.2, 6.2 | Foundation config extension (Inbound/External P0) | State |
+| ManifestValidator | Runtime gate | 採用証跡とhash照合 | 3.2-3.4, 6.1, 6.5 | ChatSettings (Inbound P0), local artifact files (External P0) | Service, State |
 | GroundingPolicy | Domain | source選択と出力検証 | 2.2-2.4, 3.1, 3.5, 5.2 | FaqCandidate DTO (Inbound P0) | Service |
-| LocalLlmAdapter | Runtime | deadlineとworker lifecycle | 3.1-3.5, 4.1-4.2, 8.1-8.5 | `run_local_llm_worker` spawn target (Outbound P0), ManifestValidator (Outbound P0) | Service, State |
-| LocalLlmWorker | Process | CPU runtime実行 | 3.1-3.3, 4.2, 8.3 | approved local runtime (External P0) | Service |
-| ChatHistoryRepository | Data | 冪等・owner履歴・原子保存 | 1.6, 5.4, 6.1-6.5, 7.1-7.4 | `Session` (Outbound P0), `BaseEntity` (Inbound P0) | Service, State |
-| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 1.6, 2.1-2.5, 3.5, 4.1-4.5, 5.3, 6.1 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0), ChatHistoryRepository (Outbound P0) | Service |
-| ChatRouter | API/Web | auth、owner、HTTP | 1.1-1.6, 5.1-6.6 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
-| ChatUI | Presentation | chat・履歴・escaped表示 | 1.1-1.6, 5.1-5.4, 6.2-6.3 | `WebLayout` (Outbound P0) | State |
+| LocalLlmAdapter | Runtime | deadlineとworker lifecycle | 3.1-3.5, 4.1-4.2, 6.1-6.5 | `run_local_llm_worker` spawn target (Outbound P0), ManifestValidator (Outbound P0) | Service, State |
+| LocalLlmWorker | Process | CPU runtime実行 | 3.1-3.3, 4.2, 6.3 | approved local runtime (External P0) | Service |
+| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 2.1-2.5, 3.5, 4.1-4.5, 5.3 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0) | Service |
+| ChatRouter | API/Web | auth、HTTP | 1.1-1.6, 5.1-5.3 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
+| ChatUI | Presentation | chat・escaped表示 | 1.1-1.6, 4.5, 5.1-5.3 | `WebLayout` (Outbound P0) | State |
 
-- **依存方向・重要度の凡例**: `Inbound` = 外部または上流からこのcomponentへcall/dataが入る; `Outbound` = このcomponentが依存先をcallする; `External` = process外のruntime/file/system; `P0` = MVP必須, `P1/P2` = 将来優先度。
+- **依存方向・重要度の凡例**: `Inbound` = 外部または上流からこのcomponentへcall/dataが入る; `Outbound` = このcomponentが依存先をcallする; `External` = process外のruntime/file/system; `P0` = MVP必須。
 
 ### Configuration and Runtime Gate
 
@@ -341,6 +305,7 @@ class ChatSettings(BaseModel):
     max_output_tokens: int
     max_answer_chars: int
     contact_guidance: str
+    server_error_message: str
 
 class ArtifactRecord(BaseModel):
     name: str
@@ -366,6 +331,7 @@ class ManifestValidator:
 ```
 
 - `contact_guidance`はlocal plain textで、trim後1..1000文字、NULおよび改行・tab以外のcontrol characterを拒否する。HTML表示時もescapeする。多言語機構は持たない。
+- `server_error_message`は共通エラーメッセージ用のlocal plain textで、同じ文字制約を適用する。
 - timeout/grace/token/charは有限正数、question/answer上限は正整数としてstartup前に拒否する。
 - `validate`は設定pathがlocal fileであること、manifest bytesのSHA-256がlocal設定`adoption_manifest_sha256`と一致すること、manifest parse、`approved=true`、全version/path/license evidence、全artifactのSHA-256一致、offline/benchmark/timeout evidence非空を要求する。manifestの期待hashはmanifest自身に置かず、承認時に設定へ固定する。成功時は検証済みmanifestを返す。
 - path/hash欠落、不一致、parse失敗、未承認、証跡不足は`ManifestValidationError`とし、`LocalLlmAdapter.is_ready`はfalse、`generate`は`LlmUnavailable`へ変換する。
@@ -424,9 +390,6 @@ def run_local_llm_worker(request: GenerationRequest) -> str:
 #### Service Contract Errors
 
 ```python
-class IdempotentConflict(Exception):
-    """未解決のin-flight冪等競合がpersisted行に解決できない場合にChatServiceが送出する。"""
-
 class FaqSearchUnavailable(Exception):
     """FaqSearchServiceが既知の利用不能失敗を返した場合にChatServiceが送出する。"""
 
@@ -447,30 +410,16 @@ class InvalidGeneratedOutput(Exception):
   - `GroundingPolicy.validate`: strict parse失敗、空または長過ぎる回答、token/char上限違反、空/重複source ID、allowed集合外のsource ID → `InvalidGeneratedOutput`。
   - `ManifestValidator.validate`: path/hash欠落、manifest期待hash不一致、parse失敗、未承認、artifact不一致、証跡不足 → `ManifestValidationError`。
   - `LocalLlmAdapter.generate`: `ManifestValidationError`、load失敗、worker停止 → `LlmUnavailable`; queue待機を含むwall-clock deadline超過 → `LlmTimeout`。
-  - `ChatService.ask`: 既知のFAQ検索失敗 → `FaqSearchUnavailable`; persisted行に解決できないin-flight冪等競合 → `IdempotentConflict`。
+  - `ChatService.ask`: 既知のFAQ検索失敗 → `FaqSearchUnavailable`。
 - `ChatService.ask`変換規則:
   - `FaqSearchUnavailable` → `server_error`。
   - `LlmUnavailable`（適合候補あり） → `direct_faq`。
   - `LlmUnavailable`（適合候補なし） → `ai_unavailable`。
   - `LlmTimeout` → `direct_faq`（適合候補が存在するため常にFAQ直接回答へ収束）。
   - `InvalidGeneratedOutput` → `direct_faq`。
-  - 未知例外とDB障害はrollback後にFoundation `ErrorHandler`へ委譲しgeneric 500とする; persisted status行には変換しない。
+  - 未知例外はFoundation `ErrorHandler`へ委譲しgeneric 500とする。
 
-### Persistence and Domain Service
-
-#### ChatHistoryRepository
-
-```python
-class ChatHistoryRepository(BaseRepository):
-    def find_by_request(self, db: Session, owner_user_id: int, request_id: UUID) -> ChatHistory | None: ...
-    def create_with_sources(self, db: Session, history: ChatHistory, sources: Sequence[ChatSourceSnapshot]) -> ChatHistory: ...
-    def list_by_owner(self, db: Session, owner_user_id: int, limit: int, offset: int) -> tuple[list[ChatHistory], int]: ...
-    def get_with_sources(self, db: Session, history_id: int) -> ChatHistory | None: ...
-```
-
-- 同じowner/requestはprocess-local keyed lock内で再確認し、既存persisted resultを返す。DB unique制約が最終authorityで、競合`IntegrityError`はrollback後に既存行を再読し、二行目を作らない。
-- createと全snapshotを一transactionでflush/commitする。保存失敗はrollbackし部分履歴を残さない。
-- 一覧は`owner_user_id`をSQL条件に含み、`created_at DESC, id DESC`、`limit/offset`で返す。
+### Domain Service
 
 #### ChatService
 
@@ -481,13 +430,14 @@ ChatStatus = Literal[
 
 class ChatService:
     async def ask(
-        self, db: Session, current: CurrentUser, request: ChatQuestionRequest
+        self, db: Session, current: CurrentUser, question: str
     ) -> ChatAnswerResponse: ...
 ```
 
-- `FaqSearchService`、`GroundingPolicy`、`LocalLlmAdapter`、Repositoryを直接注入する。検索は常に`top_k=5`で、configurable FAQ thresholdを参照しない。
-- 検索・推論は保存transaction外、最終履歴とsnapshotだけを短いtransactionで保存する。既知障害は`FaqSearchUnavailable`→`server_error`、`LlmUnavailable`（適合候補あり）→`direct_faq`、`LlmUnavailable`（適合候補なし）→`ai_unavailable`、`LlmTimeout`→`direct_faq`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換してcommitする。未知/DB障害はrollbackして再送出しFoundation 500へ委譲する。`IdempotentConflict`は再試行可能なHTTP 409としてrouterへ伝播し、新規履歴行を作らない。
-- logはrequest correlation hash、status、history ID、owner ID、duration、worker lifecycle eventだけ。質問・回答・FAQ・prompt・path・他利用者履歴を出さない。
+- `FaqSearchService`、`GroundingPolicy`、`LocalLlmAdapter`を直接注入する。検索は常に`top_k=5`で、configurable FAQ thresholdを参照しない。
+- `db`はFAQ検索のために受け取る。本仕様ではDB書き込みを行わない。
+- 既知障害は`FaqSearchUnavailable`→`server_error`、`LlmUnavailable`（適合候補あり）→`direct_faq`、`LlmUnavailable`（適合候補なし）→`ai_unavailable`、`LlmTimeout`→`direct_faq`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換する。未知例外は再送出しFoundation 500へ委譲する。
+- logはstatus、duration、worker lifecycle eventだけ。質問・回答・FAQ・prompt・pathを出さない。
 
 ### API and Presentation
 
@@ -495,70 +445,43 @@ class ChatService:
 
 ```python
 class ChatQuestionRequest(BaseModel):
-    request_id: UUID
     question: str
 
 class ChatSourceResponse(BaseModel):
-    faq_id_at_answer: int
-    current_faq_id: int | None
+    faq_id: int
     question: str
     answer: str
     confidence: float
-    is_deleted: bool
 
 class ChatAnswerResponse(BaseModel):
-    history_id: int
-    request_id: UUID
     question: str
     answer: str
     status: ChatStatus
-    created_at: datetime
+    answered_at: datetime
     sources: list[ChatSourceResponse]
-
-class HistoryListItemResponse(BaseModel):
-    history_id: int
-    request_id: UUID
-    question: str
-    answer: str
-    status: ChatStatus
-    created_at: datetime
-
-class HistoryListResponse(BaseModel):
-    items: list[HistoryListItemResponse]
-    limit: int
-    offset: int
-    total: int
-
-class HistoryDetailResponse(ChatAnswerResponse):
-    pass
 ```
 
-- `question`はtrim後1..`max_question_chars`、`limit`は1..100、`offset >= 0`。datetimeはUTC ISO 8601 JSON、confidenceは0..1。
-- `sources=[]`は窓口案内を表す。FAQ更新後もsnapshot値を返し、`current_faq_id=None`なら`is_deleted=true`である。
+- `question`はtrim後1..`max_question_chars`。datetimeはUTC ISO 8601 JSON、confidenceは0..1。
+- `sources=[]`は窓口案内またはエラーを表す。
+- `ChatAnswerResponse`はchat-historyが永続化契約の入力として利用する型である。
 
 #### ChatRouter
 
-| Method | Endpoint | Request | Response | Errors | Idempotency / Notes |
-|--------|----------|---------|----------|--------|---------------------|
+| Method | Endpoint | Request | Response | Errors | Notes |
+|--------|----------|---------|----------|--------|-------|
 | GET | `/chat` | - | HTML | unauthenticated 303 login, 500 | - |
-| POST | `/api/chat` | `ChatQuestionRequest` | `ChatAnswerResponse` 200 | 401, 409, 422, 500 | 冪等キー`(owner_user_id, request_id)`。完了済み重複は同じpersisted結果で200; 未解決のin-flight競合は再試行可能な409; 2件目の履歴行は作成しない。 |
-| GET | `/chat/history` | `limit,offset` | HTML | unauthenticated 303 login, 422, 500 | owner限定 |
-| GET | `/api/chat/history` | `limit,offset` | `HistoryListResponse` 200 | 401, 422, 500 | owner限定 |
-| GET | `/chat/history/{history_id}` | - | HTML | unauthenticated 303 login, 403, 404, 500 | owner限定 |
-| GET | `/api/chat/history/{history_id}` | - | `HistoryDetailResponse` 200 | 401, 403, 404, 500 | owner限定 |
+| POST | `/api/chat` | `ChatQuestionRequest` | `ChatAnswerResponse` 200 | 401, 422, 500 | 全5 statusはHTTP 200で返す |
 
 - 全routeに`require_authenticated_user`を適用する。HTML未認証はloginへ303、API未認証はJSON 401で本文を返さない。
-- 詳細は存在確認後に`require_owner(current, history.owner_user_id)`を必ず呼び、admin bypassを加えない。
-- 同一requestがpersist済みなら同じ200 responseを返す。同時in-flightで競合行をまだ再読できない場合だけ409 retryable response `{"detail":"Request is still processing","retryable":true}` とし、新規履歴を作らない。
-- UIは送信ごとにUUIDを一度生成しretryで再利用する。button disable/処理中表示はUX補助であり、DB制約を置換しない。全textはHTML escapeする。
+- 全textはHTML escapeする。
 
 #### 画面仕様
 
-本機能は以下の3画面で構成される。全画面は共通レイアウト（`WebLayout`）を継承し、未認証時はログイン画面へリダイレクト（303）する。全テキスト表示はHTMLエスケープ済みとする。
+本機能はチャット画面1画面で構成される。共通レイアウト（`WebLayout`）を継承し、未認証時はログイン画面へリダイレクト（303）する。全テキスト表示はHTMLエスケープ済みとする。
 
 ---
 
-##### 画面1: チャット画面（`/chat` — `index.html`）
+##### チャット画面（`/chat` — `index.html`）
 
 **画面構成**
 
@@ -596,7 +519,6 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | 8 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 回答エリア内に表示。各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
 | 9 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言。回答エリア内に表示する | `no_match` / `ai_unavailable` / `server_error` 時 |
 | 10 | 窓口案内メッセージ | `guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み）。回答エリア内に表示する | `no_match` / `ai_unavailable` 時 |
-| 11 | リクエストID | `request_id` | hidden | UUID v4 | 自動生成 | 送信ごとに1回生成、リトライ時は同じ値を再利用 | 非表示 |
 
 **状態ラベル対応表**
 
@@ -620,11 +542,10 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | A4 | 回答受信（`ai_answer` / `direct_faq`） | `answer_text`, `sources` | 回答エリアに回答テキストと出典FAQ一覧を一体表示する |
 | A5 | 回答受信（`no_match` / `ai_unavailable`） | `no_source_msg`, `guidance` | 回答エリアに「出典が見つかりません」＋窓口案内を表示する。出典一覧は表示しない |
 | A6 | 回答受信（`server_error`） | `error_msg` | 回答エリアにサーバエラーメッセージを表示する。内部詳細は表示しない |
-| A7 | 回答受信後 | `submit_btn`, `loading`, `request_id` | 送信ボタンを再活性にし、処理中を非表示にし、新しいUUID v4を生成する |
+| A7 | 回答受信後 | `submit_btn`, `loading` | 送信ボタンを再活性にし、処理中を非表示にする |
 | A8 | バリデーションエラー（空入力） | `error_msg`, `question` | 質問フォームのすぐ下に空入力エラーメッセージを表示する。入力内容は保持し修正可能にする |
 | A9 | バリデーションエラー（文字数超過） | `error_msg`, `question` | 質問フォームのすぐ下に文字数超過エラーメッセージを表示する。入力内容は保持し修正可能にする |
-| A10 | 409応答（競合） | - | 同一 `request_id` で自動リトライする |
-| A11 | 500応答（システムエラー） | `error_msg` | 質問フォームのすぐ下に共通エラーメッセージを表示する（内部詳細は表示しない） |
+| A10 | 500応答（システムエラー） | `error_msg` | 質問フォームのすぐ下に共通エラーメッセージを表示する（内部詳細は表示しない） |
 
 **バリデーション**
 
@@ -633,187 +554,21 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | V1 | `question` | 必須入力（trim後1文字以上） | 「質問を入力してください」（空入力エラー） | 送信ボタン押下時（クライアント側） |
 | V2 | `question` | 最大400文字（trim後） | 「質問は400文字以内で入力してください」（文字数超過エラー） | 送信ボタン押下時（クライアント側） |
 | V3 | `question` | trim後1〜400文字 | 422エラー | サーバー側（`ChatQuestionRequest`バリデーション） |
-| V4 | `request_id` | 有効なUUID形式 | 422エラー | サーバー側 |
 
 - V1〜V2はクライアント側で即時フィードバックし、送信を抑止する。エラーメッセージは質問フォームのすぐ下に表示する。
-- V3〜V4はサーバー側でも必ず再検証する（クライアント検証のバイパス対策）。
-- バリデーションエラー時は処理・履歴保存を一切行わない。
-
----
-
-##### 画面2: 履歴一覧画面（`/chat/history` — `history.html`）
-
-**画面構成**
-
-```
-┌──────────────────────────────────┐
-│ ヘッダー（共通レイアウト）           │
-├──────────────────────────────────┤
-│ ■ 件数表示  「全 N 件中 1〜20 件」   │
-├──────────────────────────────────┤
-│ ■ 履歴リスト                       │
-│  ┌────┬──────┬──────┬──────┬────┐ │
-│  │日時 │質問(抜粋)│回答(抜粋)│状態  │詳細│ │
-│  ├────┼──────┼──────┼──────┼────┤ │
-│  │... │...     │...     │...  │→  │ │
-│  └────┴──────┴──────┴──────┴────┘ │
-├──────────────────────────────────┤
-│ [前へ]           [次へ]            │
-├──────────────────────────────────┤
-│ チャット画面へのリンク               │
-└──────────────────────────────────┘
-```
-
-**画面項目**
-
-| No | 項目名 | 項目ID | 種別 | 型 | 初期値 | フォーマット / 備考 | 表示条件 |
-|----|--------|--------|------|-----|--------|-------------------|---------|
-| 1 | 件数表示 | `total_count` | テキスト | - | サーバーから取得 | `全{total}件中 {offset+1}〜{offset+表示件数}件` | 1件以上の場合 |
-| 2 | 履歴リスト | `history_list` | テーブル | - | サーバーから取得 | 新しい順（`created_at DESC`） | 1件以上の場合 |
-| 2-1 | 作成日時 | - | テキスト | datetime | - | `YYYY/MM/DD HH:mm` | 各行 |
-| 2-2 | 質問文（抜粋） | - | テキスト | 文字列 | - | HTMLエスケープ済み、長文は末尾を省略（「...」） | 各行 |
-| 2-3 | 回答文（抜粋） | - | テキスト | 文字列 | - | HTMLエスケープ済み、長文は末尾を省略（「...」） | 各行 |
-| 2-4 | 回答状態 | - | テキスト | 文字列 | - | 状態ラベル対応表を参照 | 各行 |
-| 2-5 | 詳細リンク | - | リンク | - | - | `/chat/history/{history_id}` | 各行 |
-| 3 | 「前へ」ボタン | `prev_btn` | button | - | 非活性 | `offset=0` のとき非活性 | 常時表示 |
-| 4 | 「次へ」ボタン | `next_btn` | button | - | 活性/非活性 | 最終ページのとき非活性 | 常時表示 |
-| 5 | 履歴なしメッセージ | `empty_msg` | テキスト | - | 非表示 | 「質問履歴はありません」 | 履歴0件の場合 |
-| 6 | チャット画面リンク | `chat_link` | リンク | - | `/chat` | ラベル: 「チャットへ戻る」 | 常時表示 |
-
-**アクション・イベント**
-
-| No | トリガー | 対象項目 | 動作 |
-|----|---------|---------|------|
-| A1 | 画面表示時 | `history_list` | `GET /chat/history?limit=20&offset=0` で本人の履歴を取得し表示する |
-| A2 | 行クリック / 詳細リンク押下 | - | 履歴詳細画面（`/chat/history/{history_id}`）へ遷移する |
-| A3 | 「次へ」ボタン押下 | `history_list` | `offset += limit` で次ページを取得し表示を更新する |
-| A4 | 「前へ」ボタン押下 | `history_list` | `offset -= limit` で前ページを取得し表示を更新する |
-
-**バリデーション**
-
-| No | 対象 | ルール | エラーメッセージ | チェックタイミング |
-|----|------|--------|----------------|-----------------|
-| V1 | `limit` | 1〜100の整数 | 422エラー | サーバー側 |
-| V2 | `offset` | 0以上の整数 | 422エラー | サーバー側 |
-
-- 本人の履歴のみ取得される（他人の履歴は結果に含まれない）。
-
----
-
-##### 画面3: 履歴詳細画面（`/chat/history/{history_id}` — `detail.html`）
-
-**画面構成**
-
-```
-┌──────────────────────────────────┐
-│ ヘッダー（共通レイアウト）           │
-├──────────────────────────────────┤
-│ ■ 質問表示エリア                    │
-│   質問文テキスト                    │
-│   作成日時 / 回答状態ラベル          │
-├──────────────────────────────────┤
-│ ■ 回答表示エリア（上部）            │
-│   回答テキスト                      │
-├──────────────────────────────────┤
-│ ■ 出典FAQ表示エリア（下部）         │
-│  ┌────┬──────┬──────┬────┬────┐  │
-│  │FAQ ID│質問文  │回答文  │類似度│状態│  │
-│  ├────┼──────┼──────┼────┼────┤  │
-│  │...  │...    │...    │0.85│   │  │
-│  └────┴──────┴──────┴────┴────┘  │
-│  ※「出典が見つかりません」（該当なし時）│
-├──────────────────────────────────┤
-│ 一覧に戻るリンク                     │
-└──────────────────────────────────┘
-```
-
-**画面項目**
-
-| No | 項目名 | 項目ID | 種別 | 型 | 初期値 | フォーマット / 備考 | 表示条件 |
-|----|--------|--------|------|-----|--------|-------------------|---------|
-| 1 | 質問文 | `detail_question` | テキスト | 文字列 | サーバーから取得 | HTMLエスケープ済み全文表示 | 常時表示 |
-| 2 | 回答テキスト | `detail_answer` | テキスト | 文字列 | サーバーから取得 | HTMLエスケープ済み全文表示 | 常時表示 |
-| 3 | 回答状態ラベル | `detail_status` | テキスト | 文字列 | サーバーから取得 | 状態ラベル対応表を参照 | 常時表示 |
-| 4 | 作成日時 | `detail_created_at` | テキスト | datetime | サーバーから取得 | `YYYY/MM/DD HH:mm:ss` | 常時表示 |
-| 5 | 出典FAQ一覧 | `detail_sources` | テーブル | - | サーバーから取得 | 回答時点のスナップショット値を表示 | 出典が1件以上の場合 |
-| 5-1 | FAQ ID | - | テキスト | 整数 | - | `faq_id_at_answer`の値 | 各出典 |
-| 5-2 | FAQ質問文 | - | テキスト | 文字列 | - | スナップショット値（HTMLエスケープ済み） | 各出典 |
-| 5-3 | FAQ回答文 | - | テキスト | 文字列 | - | スナップショット値（HTMLエスケープ済み） | 各出典 |
-| 5-4 | 類似度 | - | テキスト | 小数 | - | 小数2桁表示（例: `0.85`）、範囲: 0.00〜1.00 | 各出典 |
-| 5-5 | 削除済みラベル | - | テキスト | - | 非表示 | 「（削除済み）」 | 元FAQが削除済みの場合（`is_deleted=true`） |
-| 6 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言 | `no_match` / `ai_unavailable` / `server_error` 時 |
-| 7 | 窓口案内メッセージ | `detail_guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み） | `no_match` / `ai_unavailable` 時 |
-| 8 | 一覧に戻るリンク | `back_link` | リンク | - | `/chat/history` | ラベル: 「一覧に戻る」 | 常時表示 |
-
-**アクション・イベント**
-
-| No | トリガー | 対象項目 | 動作 |
-|----|---------|---------|------|
-| A1 | 画面表示時 | 全項目 | `GET /chat/history/{history_id}` で履歴詳細を取得し表示する |
-| A2 | 一覧リンク押下 | `back_link` | 履歴一覧画面（`/chat/history`）へ遷移する |
-
-**バリデーション**
-
-| No | 対象 | ルール | エラーメッセージ / レスポンス | チェックタイミング |
-|----|------|--------|--------------------------|-----------------|
-| V1 | `history_id` | 存在する履歴であること | 404 Not Found | サーバー側 |
-| V2 | `history_id` | 本人所有の履歴であること（管理者でも他人は不可） | 403 Forbidden | サーバー側 |
-
-- 出典FAQはすべて回答時点のスナップショットを表示する（現在のFAQ内容では上書きしない）。
-- 元FAQが削除された場合でも、スナップショット値は保持され表示される。`is_deleted=true`の場合は「（削除済み）」ラベルを付与する。
-
-## Data Models
-
-### Domain Model
-- `ChatHistory`は一問一答のaggregate rootで、owner/requestの冪等keyと最終状態を持つ。
-- `ChatSourceSnapshot`は回答時点のimmutable value recordである。`BaseEntity.updated_at`を持ってもUPDATE operationを提供しない。
-- `ModelAdoptionManifest`はDB外のlocal approval artifactで、chat履歴transactionには参加しない。
-
-### Physical Data Model
-
-**chat_history**
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INTEGER | PK、BaseEntity |
-| owner_user_id | INTEGER | NOT NULL、FK users.id、index |
-| request_id | CHAR(36) | NOT NULL |
-| question | TEXT | NOT NULL |
-| answer | TEXT | NOT NULL |
-| status | VARCHAR(32) | NOT NULL、five-value CHECK (`ai_answer`, `direct_faq`, `no_match`, `ai_unavailable`, `server_error`) |
-| created_at | DATETIME | NOT NULL、BaseEntity |
-| updated_at | DATETIME | NOT NULL、BaseEntity |
-
-- `UNIQUE(owner_user_id, request_id)`。
-- indexは`(owner_user_id, created_at DESC, id DESC)`。user削除は上流方針どおり履歴存在時RESTRICT。
-
-**chat_source_snapshot**
-
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INTEGER | PK、BaseEntity |
-| chat_history_id | INTEGER | NOT NULL、FK chat_history.id ON DELETE CASCADE |
-| faq_id | INTEGER | NULL、FK faq.id ON DELETE SET NULL |
-| faq_id_at_answer | INTEGER | NOT NULL |
-| question_snapshot | TEXT | NOT NULL |
-| answer_snapshot | TEXT | NOT NULL |
-| confidence_snapshot | FLOAT | NOT NULL、CHECK 0..1 |
-| ordinal | INTEGER | NOT NULL |
-| created_at | DATETIME | NOT NULL、BaseEntity |
-| updated_at | DATETIME | NOT NULL、BaseEntity |
-
-- `UNIQUE(chat_history_id, ordinal)`。snapshot rowは生成後に更新しない。FAQ更新では値不変、削除では`faq_id`だけDB参照動作でNULLになり、`faq_id_at_answer`とsnapshotは残る。
+- V3はサーバー側でも必ず再検証する（クライアント検証のバイパス対策）。
+- バリデーションエラー時は回答処理を一切行わない。
 
 ## Error Handling
 
 ### Error Strategy
-- 422: UUID/schema、question、limit/offset、local startup設定不正。質問処理・履歴保存を開始しない。
-- 401/303: API/HTML別の上流認証挙動。403: owner不一致。404: 履歴不存在。409: 稀な同一key in-flight競合のみ。
-- FAQ既知障害→`server_error`、LLM未準備（適合あり）→`direct_faq`、LLM未準備（適合なし）→`ai_unavailable`、timeout→`direct_faq`、invalid output→`direct_faq`は正常なpersisted fallbackでHTTP 200。
-- DB/未知例外はrollbackしFoundation汎用500へ委譲し、内部詳細をresponseへ出さない。
+- 422: question schema不正。回答処理を開始しない。
+- 401/303: API/HTML別の上流認証挙動。
+- FAQ既知障害→`server_error`、LLM未準備（適合あり）→`direct_faq`、LLM未準備（適合なし）→`ai_unavailable`、timeout→`direct_faq`、invalid output→`direct_faq`は正常なfallback responseでHTTP 200。
+- 未知例外はFoundation汎用500へ委譲し、内部詳細をresponseへ出さない。
 
 ### Monitoring
-- metricはstatus count、duration、queue wait、timeout、worker terminate/recreate、manifest gate failure、DB rollbackを本文なしで記録する。
+- metricはstatus count、duration、queue wait、timeout、worker terminate/recreate、manifest gate failureを本文なしで記録する。
 - runtime readinessをchat内部診断に利用できるが、Foundation health-checkの変更・依存は行わない。
 
 ## Testing Strategy
@@ -822,59 +577,36 @@ class HistoryDetailResponse(ChatAnswerResponse):
 
 | IDs | Required verification |
 |-----|-----------------------|
-| 1.1-1.6 | 処理中→同画面結果、空入力エラー無保存、文字数超過エラー無保存、HTML 303/API 401、同一UUID連打・retryが同じhistory IDで一行のみ |
+| 1.1-1.6 | 処理中→同画面結果、空入力エラー無処理、文字数超過エラー無処理、HTML 303/API 401、送信中ボタン非活性による重複抑止 |
 | 2.1-2.5 | 正規FAQ DTO、`top_k=5`、`is_match=true`だけ、has-match不整合も安全側、履歴/tools/外部知識なし、検索失敗案内 |
 | 3.1-3.5 | short structured generation、no-network、Windows CPU、未承認artifact拒否、空/parse/too-long/invalid source ID fallback |
-| 4.1-4.5 | load停止/不能→FAQ直接回答、hard timeout→FAQ直接回答、LLM不能＋適合なし→AI利用不可、検索不能→サーバエラー、全5 persisted status＋2 validation error、未知例外が共通500 |
-| 5.1-5.4 | source全field、実引用のみ、案内sources空、detail snapshot再現 |
-| 6.1-6.6 | 原子保存、owner一覧/詳細、adminも他人403、再起動保持、共有/export/横断endpointなし |
-| 7.1-7.4 | snapshot全field、FAQ更新不変、削除時SET NULLと削除表示、FAQ更新削除成功 |
-| 8.1-8.5 | offline/no credential/GPU、全local設定検証、CPU負荷timeout収束、本文nolog、artifact変更時gate再実行 |
+| 4.1-4.5 | load停止/不能→FAQ直接回答、hard timeout→FAQ直接回答、LLM不能＋適合なし→AI利用不可、検索不能→サーバエラー、全5 API status＋2 validation error、未知例外が共通500 |
+| 5.1-5.3 | source全field、実引用のみ、案内sources空 |
+| 6.1-6.5 | offline/no credential/GPU、全local設定検証、CPU負荷timeout収束、本文nolog、artifact変更時gate再実行 |
 
 ### Unit Tests
 - `GroundingPolicy`: stable tie-break、`is_match=false`除外、質問/FAQ内のmalicious prompt injectionをdata扱い、unknown/duplicate source ID、parse失敗、空、token/char超過を拒否する（2.2-2.4, 3.1, 3.5, 5.2）。
-- `ChatService`: 5 persisted statusごとにanswer/sourceが厳密に一致し、search/LLM障害時に直接fallback選択を再計算しない（2.3, 2.5, 4.1-4.4）。
-- `ChatSettings`/manifest: control character、長さ、hash/version/license/evidence/approved不一致をfail-closedにする（3.4, 8.2, 8.5）。
-- Repository: immutable snapshot API、stable pagination、unique violation再読、transaction rollbackでhistory/sourceとも0件（1.6, 6.1, 7.1）。
+- `ChatService`: 5 API statusごとにanswer/sourceが厳密に一致し、search/LLM障害時に直接fallback選択を再計算しない（2.3, 2.5, 4.1-4.4）。
+- `ChatSettings`/manifest: control character、長さ、hash/version/license/evidence/approved不一致をfail-closedにする（3.4, 6.2, 6.5）。
 
 ### Integration Tests
-- 同一`request_id`を逐次・同時送信し既存persisted responseを再利用、二行目を作らずUI disableなしでも成立する（1.6）。
-- API/HTML認証差、一般userとadminのowner isolation、一覧SQLにも他人が混入しないことを確認する（1.5, 6.2-6.4）。
-- FAQ更新後は旧snapshot、削除後はnullable FKと`faq_id_at_answer`を保持し、FAQ update/delete自体を妨げない（5.4, 7.1-7.4）。
-- 保存途中failure injectionでrollback、未知例外は本文なし500、再起動後に履歴を復元する（4.5, 6.1, 6.5）。
-- socket/networkをdenyし、repo ID/URL/API client利用がなく`ai_answer`または安全fallbackへ収束する（3.2, 8.1）。
+- API/HTML認証差を確認する（1.5）。
+- socket/networkをdenyし、repo ID/URL/API client利用がなく`ai_answer`または安全fallbackへ収束する（3.2, 6.1）。
+- 設定不正でstartup拒否、設定正常で正常応答を確認する（6.2）。
 
 ### E2E and Windows Adoption Tests
-- login→UUID質問→処理中→escaped回答/source→履歴一覧→詳細、空入力エラー・文字数超過エラーの修正表示をフォーム下に確認する（1.1-1.6, 5.1-5.4）。
+- login→質問→処理中→escaped回答/source、空入力エラー・文字数超過エラーの修正表示をフォーム下に確認する（1.1-1.6, 5.1-5.3）。
 - malicious FAQ HTML/scriptとprompt命令が実行・解釈されず、invalid generated source IDが直接FAQへ退避する（3.5, 5.2）。
-- GPUなし対象Windows CPUでqueue待機込みtimeoutを発生させ、取消/grace/terminate後にprocess消滅とCPU収束、clean workerで次要求成功を計測する（4.2, 8.3）。
-- 採用候補ごとにoffline起動、memory、load、P50/P95、max token/char、timeout-stop evidenceを取得し、fresh official license/runtime確認結果とともにmanifestへ記録する。承認前は`is_ready=false`を確認する（3.3-3.4, 8.1, 8.5）。
+- GPUなし対象Windows CPUでqueue待機込みtimeoutを発生させ、取消/grace/terminate後にprocess消滅とCPU収束、clean workerで次要求成功を計測する（4.2, 6.3）。
+- 採用候補ごとにoffline起動、memory、load、P50/P95、max token/char、timeout-stop evidenceを取得し、fresh official license/runtime確認結果とともにmanifestへ記録する。承認前は`is_ready=false`を確認する（3.3-3.4, 6.1, 6.5）。
 
 ## Security Considerations
-- owner IDはrequestから受けず`CurrentUser.id`を保存する。詳細はadminを含め`require_owner`で拒否する。
 - 質問/FAQはuntrusted data、generated JSONもuntrusted inputである。allowed source ID集合とlengthを親processで再検証する。
 - Jinja autoescapeとtext insertionを使い、質問・FAQ・生成文・窓口案内をsafe HTMLへ昇格しない。
 - model/artifactはlocal read-only pathとhashで固定し、自動download・外部資格情報・network clientを持たない。
-- sensitive本文をlogせず、通常のSQLite file/session保護は上流運用境界に従う。
+- sensitive本文をlogしない。
 
 ## Performance & Scalability
-- MVPは単一Web application instance、同時生成1、少人数を前提とする。複数Web process化は冪等in-flight coordinationとworker数を再設計するtriggerである。
+- MVPは単一Web application instance、同時生成1、少人数を前提とする。
 - timeoutはqueue waitを含むwall-clock deadlineであり、応答返却後のCPU残存を許さない。max tokens/charsで上限を二重化する。
-- 履歴は`limit/offset`と複合indexを使う。推論中にDB transactionを保持しない。
 - runtime/modelの数値目標は採用前には確定しない。対象Windows機で得たbenchmarkとtimeout-stop evidenceがmanifest承認条件である。
-
-## Migration Strategy
-
-```mermaid
-flowchart LR
-    Baseline --> Auth002
-    Auth002 --> Faq003
-    Faq003 --> Chat004
-    Chat004 --> Validate
-    Validate --> Start
-```
-
-- 正しい順序はFoundation `baseline.sql` → `002` auth → `003` FAQ → `004_ai_helpdesk_chat.sql`である。Foundationを`001`として扱わない。
-- `004`はchat所有table/index/constraintのみ追加し、upstream tableを変更しない。
-- Foundation `DatabaseEngine`が全接続で`PRAGMA foreign_keys=ON`を保証することを起動時に検証する。無効な場合はchat routerとworkerを有効化せずfail-fastとし、chat側で接続所有権を迂回しない。
-- MigrationRunnerのfail-fastと再適用規約に従い、失敗時はstartupしない。schema作成、接続単位のFK有効性、FK/unique/index検証後にrouterを利用可能にする。

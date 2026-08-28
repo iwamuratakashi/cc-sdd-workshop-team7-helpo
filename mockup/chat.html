@@ -368,22 +368,6 @@
       margin-top: 8px;
     }
 
-    /* ===== Navigation Link ===== */
-    .nav-link {
-      text-align: center;
-      margin-top: 8px;
-    }
-
-    .nav-link a {
-      color: #2563eb;
-      text-decoration: none;
-      font-size: 16px;
-    }
-
-    .nav-link a:hover {
-      text-decoration: underline;
-    }
-
     /* ===== Utility ===== */
     .hidden {
       display: none !important;
@@ -411,7 +395,7 @@
     </div>
 
     <div class="mockup-btn-group">
-      <div class="mockup-btn-group-label">回答パターン（persisted status）</div>
+      <div class="mockup-btn-group-label">回答パターン（API status）</div>
       <button class="mockup-btn" onclick="setState('ai_answer')">AI回答（ai_answer）</button>
       <button class="mockup-btn" onclick="setState('direct_faq')">FAQ直接回答（direct_faq）</button>
       <button class="mockup-btn" onclick="setState('no_match')">該当FAQなし（no_match）</button>
@@ -472,11 +456,6 @@
       </div>
     </div>
 
-    <!-- 履歴一覧リンク -->
-    <div class="nav-link">
-      <a href="/chat/history">履歴一覧</a>
-    </div>
-
   </main>
 
   <!-- ===== 質問入力エリア（画面下部固定） ===== -->
@@ -500,14 +479,13 @@
       </div>
     </div>
 
-    <!-- hidden: request_id -->
-    <input type="hidden" id="request-id" />
   </div>
 
   <script>
     // ===== ダミーデータ =====
 
     var CONTACT_GUIDANCE = 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。';
+    var SERVER_ERROR_MESSAGE = 'システムエラーが発生しました。しばらく時間をおいてから再度お試しください。';
 
     var STATUS_LABELS = {
       ai_answer: 'AI回答',
@@ -521,82 +499,66 @@
       switch (status) {
         case 'ai_answer':
           return {
-            history_id: 1,
-            request_id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
             question: '有給休暇の申請方法を教えてください',
             answer: '有給休暇の申請は、社内ポータルの「勤怠管理」メニューから行えます。「休暇申請」ボタンをクリックし、希望日と理由を入力して申請してください。申請は希望日の3営業日前までに提出が必要です。上長の承認後、申請完了の通知メールが届きます。',
             status: 'ai_answer',
-            created_at: '2026-08-27T10:30:00Z',
+            answered_at: '2026-08-27T10:30:00Z',
             sources: [
               {
-                faq_id_at_answer: 12,
-                current_faq_id: 12,
+                faq_id: 12,
                 question: '有給休暇はどのように申請しますか？',
                 answer: '社内ポータルの「勤怠管理」→「休暇申請」から申請できます。希望日の3営業日前までに申請してください。',
-                confidence: 0.92,
-                is_deleted: false
+                confidence: 0.92
               },
               {
-                faq_id_at_answer: 15,
-                current_faq_id: 15,
+                faq_id: 15,
                 question: '休暇申請の承認フローを教えてください',
                 answer: '休暇申請は直属の上長が承認します。承認後、申請者と人事部に通知メールが送信されます。',
-                confidence: 0.78,
-                is_deleted: false
+                confidence: 0.78
               }
             ]
           };
 
         case 'direct_faq':
           return {
-            history_id: 2,
-            request_id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
             question: '経費精算の締め日はいつですか',
             answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
             status: 'direct_faq',
-            created_at: '2026-08-27T11:00:00Z',
+            answered_at: '2026-08-27T11:00:00Z',
             sources: [
               {
-                faq_id_at_answer: 8,
-                current_faq_id: 8,
+                faq_id: 8,
                 question: '経費精算の締め日と振込日を教えてください',
                 answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
-                confidence: 0.95,
-                is_deleted: false
+                confidence: 0.95
               }
             ]
           };
 
         case 'no_match':
           return {
-            history_id: 3,
-            request_id: 'c3d4e5f6-a7b8-9012-cdef-123456789012',
             question: '近くのおすすめのランチスポットを教えて',
             answer: CONTACT_GUIDANCE,
             status: 'no_match',
-            created_at: '2026-08-27T11:30:00Z',
+            answered_at: '2026-08-27T11:30:00Z',
             sources: []
           };
 
         case 'ai_unavailable':
           return {
-            history_id: 4,
-            request_id: 'd4e5f6a7-b8c9-0123-defa-234567890123',
             question: '健康診断の予約方法を教えてください',
             answer: CONTACT_GUIDANCE,
             status: 'ai_unavailable',
-            created_at: '2026-08-27T12:00:00Z',
+            answered_at: '2026-08-27T12:00:00Z',
             sources: []
           };
 
         case 'server_error':
           return {
-            history_id: 5,
-            request_id: 'e5f6a7b8-c9d0-1234-efab-345678901234',
             question: '出張申請の手順を教えてください',
-            answer: CONTACT_GUIDANCE,
+            answer: SERVER_ERROR_MESSAGE,
             status: 'server_error',
-            created_at: '2026-08-27T12:30:00Z',
+            answered_at: '2026-08-27T12:30:00Z',
             sources: []
           };
 
@@ -620,7 +582,6 @@
     var elQuestion     = document.getElementById('question');
     var elCharCount    = document.getElementById('char-count');
     var elSubmitBtn    = document.getElementById('submit-btn');
-    var elRequestId    = document.getElementById('request-id');
 
     // ===== 文字数カウンター =====
     elQuestion.addEventListener('input', function () {
@@ -632,20 +593,6 @@
         elCharCount.classList.remove('over-limit');
       }
     });
-
-    // ===== UUID生成 =====
-    function generateUUID() {
-      if (crypto && crypto.randomUUID) {
-        return crypto.randomUUID();
-      }
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        var r = (Math.random() * 16) | 0;
-        var v = c === 'x' ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      });
-    }
-
-    elRequestId.value = generateUUID();
 
     // ===== HTMLエスケープ =====
     function escapeHtml(str) {
@@ -667,6 +614,7 @@
       elStatusLabel.className = 'status-label';
       elSourceTbody.innerHTML = '';
       elGuidanceMsg.textContent = '';
+      elGuidanceMsg.style.display = '';
       elSubmitBtn.disabled = false;
       elQuestion.disabled = false;
     }
@@ -687,7 +635,7 @@
         var tr = document.createElement('tr');
 
         var tdId = document.createElement('td');
-        tdId.textContent = s.faq_id_at_answer;
+        tdId.textContent = s.faq_id;
         tr.appendChild(tdId);
 
         var tdQ = document.createElement('td');
@@ -703,12 +651,6 @@
         badge.className = 'confidence-badge';
         badge.textContent = s.confidence.toFixed(2);
         tdC.appendChild(badge);
-        if (s.is_deleted) {
-          var del = document.createElement('span');
-          del.style.cssText = 'display:block;color:#dc2626;font-size:13px;margin-top:4px;';
-          del.textContent = '（削除済み）';
-          tdC.appendChild(del);
-        }
         tr.appendChild(tdC);
 
         elSourceTbody.appendChild(tr);
@@ -716,9 +658,16 @@
       elSourceArea.classList.add('visible');
     }
 
-    // ===== 窓口案内表示（回答エリア内） =====
-    function showGuidance() {
+    // ===== 出典なし＋窓口案内表示（回答エリア内） =====
+    function showNoSourceWithGuidance() {
       elGuidanceMsg.textContent = CONTACT_GUIDANCE;
+      elGuidanceMsg.style.display = '';
+      elNoSourceArea.classList.add('visible');
+    }
+
+    // ===== 出典なし表示のみ（窓口案内なし、server_error用） =====
+    function showNoSourceOnly() {
+      elGuidanceMsg.style.display = 'none';
       elNoSourceArea.classList.add('visible');
     }
 
@@ -770,7 +719,7 @@
           elQuestion.value = resp2.question;
           elCharCount.textContent = resp2.question.length + ' / 400';
           showAnswer(resp2);
-          showGuidance();
+          showNoSourceWithGuidance();
           break;
         }
 
@@ -779,7 +728,7 @@
           elQuestion.value = resp3.question;
           elCharCount.textContent = resp3.question.length + ' / 400';
           showAnswer(resp3);
-          showGuidance();
+          showNoSourceOnly();
           break;
         }
 
@@ -840,7 +789,6 @@
         elCharCount.textContent = q.length + ' / 400';
         showAnswer(resp);
         showSources(resp.sources);
-        elRequestId.value = generateUUID();
       }, 1500);
     }
 
