@@ -14,7 +14,7 @@
   // 3リンク固定。非活性でも非表示にはしない（Requirement 3.1, 4.1）。
   var NAV_LINKS_CONFIG = [
     { key: 'question', href: 'chat.html', label: '質問' },
-    { key: 'history', href: 'chat.html', label: '履歴' },
+    { key: 'history', href: 'history.html', label: '履歴' },
     { key: 'faq_admin', href: 'upload.html', label: 'FAQ管理' }
   ];
 

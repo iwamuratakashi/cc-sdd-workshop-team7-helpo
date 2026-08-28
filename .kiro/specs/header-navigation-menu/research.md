@@ -4,14 +4,15 @@
 
 ### 実装コードの有無
 - リポジトリ内に実アプリケーションコード（`app/`、`pyproject.toml`等）は存在しない。`helpo-foundation`・`local-user-authentication`・`faq-management-and-search`・`ai-helpdesk-chat`はいずれも`design.md`/`tasks.md`まで作成済みだが、実装フェーズはまだ着手されていない（greenfield）。
-- 現在存在する実体は `mockup/` 配下の静的HTMLモックアップ3点のみ：
+- 現在存在する実体は `mockup/` 配下の静的HTMLモックアップ4点：
   - `mockup/login.html`（local-user-authentication のログイン画面モック）
   - `mockup/chat.html`（ai-helpdesk-chat のチャット画面モック）
+  - `mockup/history.html`（chat-history の履歴一覧画面モック）
   - `mockup/upload.html`（faq-management-and-search のFAQアップロード画面モック）
 
 ### モックアップの現状のヘッダー実装
-- 3画面とも同一パターンの `<header class="header"><div class="header-title">...</div></header>` を**画面ごとに個別実装**しており、共有コンポーネントは存在しない。
-- `header-title` の内容は画面ごとに異なる（例: `chat.html`は「Helpo / AI社内ヘルプデスク」、`upload.html`は「Helpo / FAQ管理」、`login.html`は「Helpo / AI社内ヘルプデスク」）。統一された「HELPO」というサービスタイトル表示や、質問・履歴・FAQ管理へのナビゲーションリンクは3画面のいずれにも存在しない。
+- 4画面とも同一パターンの `<header class="header"><div class="header-title">...</div></header>` を**画面ごとに個別実装**しており、共有コンポーネントは存在しない。
+- `header-title` の内容は画面ごとに異なる（例: `chat.html`・`history.html`は「Helpo / AI社内ヘルプデスク」、`upload.html`は「Helpo / FAQ管理」、`login.html`は「Helpo / AI社内ヘルプデスク」）。統一された「HELPO」というサービスタイトル表示や、質問・履歴・FAQ管理へのナビゲーションリンクは4画面のいずれにも存在しない。
 - ログイン中の利用者名・ロール表示、ログアウトボタンもモックアップには実装されていない（`login.html`では認証成功後に`chat.html`へ`window.location.href`で遷移するのみ）。
 - `chat.html`には「履歴一覧」への`nav-link`（`<a href="/chat/history">`）が本文下部に1つだけ存在するが、これはヘッダー内のナビゲーションではなく本文内リンクであり、本仕様が対象とするヘッダーメニューとは別物。
 

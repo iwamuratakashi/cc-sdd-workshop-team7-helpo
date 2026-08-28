@@ -112,7 +112,7 @@ helpo/
 
 ### Modified Files
 
-- 各画面所有仕様のテンプレート（local-user-authenticationの`login.html`、ai-helpdesk-chatの`chat.html`/`history.html`/`detail.html`、faq-management-and-searchの`upload.html`） — `{% extends "base.html" %}`を`{% extends "_page_base.html" %}`へ変更する。この変更は各所有仕様の実装タスク側で行い、本仕様は変更すべきテンプレート名の契約提供のみを行う。
+- 各画面所有仕様のテンプレート（local-user-authenticationの`login.html`、ai-helpdesk-chatの`chat.html`、chat-historyの`history.html`/`detail.html`、faq-management-and-searchの`upload.html`） — `{% extends "base.html" %}`を`{% extends "_page_base.html" %}`へ変更する。この変更は各所有仕様の実装タスク側で行い、本仕様は変更すべきテンプレート名の契約提供のみを行う。
 - local-user-authenticationの`app/templates/auth/_nav.html` — 本仕様の`_header_menu.html`に表示責務が一本化されるため、重複回避のためlocal-user-authentication側で撤去または縮小を検討する（本仕様の実装タスクの対象外）。
 
 ## System Flows
