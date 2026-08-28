@@ -86,7 +86,7 @@ class TestAuthFlow:
     def test_login_success_redirects(self, app_client):
         r = app_client.post("/login", data={"username": "user01", "password": "password"}, follow_redirects=False)
         assert r.status_code == 303
-        assert r.headers["location"] == "/"
+        assert r.headers["location"] == "/chat"
         assert "helpo_session" in r.cookies
 
     def test_login_wrong_password_400(self, app_client):

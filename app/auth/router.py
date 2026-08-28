@@ -145,9 +145,9 @@ async def login_submit(
         )
         return html
 
-    # 認証成功
+    # 認証成功（質問画面へ遷移）
     _guard.register_success(db, attempt_digest, now)
-    redirect = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    redirect = RedirectResponse(url="/chat", status_code=status.HTTP_303_SEE_OTHER)
     _set_session_cookie(redirect, issued.token)
     return redirect
 
