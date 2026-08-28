@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Helpo - ログイン</title>
+  <style>
+    /* ===== Reset & Base ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Meiryo", "Noto Sans JP", sans-serif;
+      font-size: 16px;
+      line-height: 1.7;
+      color: #1a1a1a;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ===== Header (WebLayout mock) ===== */
+    .header {
+      background: #2563eb;
+      color: #fff;
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* ===== Mockup Controls ===== */
+    .mockup-controls {
+      background: #fef3c7;
+      border-bottom: 2px solid #f59e0b;
+      padding: 16px 32px;
+    }
+
+    .mockup-controls-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #92400e;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .mockup-btn-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .mockup-btn-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .mockup-btn-group-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #78350f;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+
+    .mockup-btn {
+      font-size: 13px;
+      padding: 6px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      color: #374151;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mockup-btn:hover {
+      background: #f3f4f6;
+    }
+
+    .mockup-btn.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+
+    /* ===== Main Container ===== */
+    .main {
+      max-width: 420px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 48px 24px;
+      flex: 1;
+    }
+
+    /* ===== Section shared ===== */
+    .section {
+      background: #fff;
+      border-radius: 8px;
+      padding: 32px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .section-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+
+    /* ===== Form ===== */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 16px;
+      font-family: inherit;
+      font-size: 16px;
+      line-height: 1.7;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      color: #1a1a1a;
+      background: #fff;
+      transition: border-color 0.15s;
+    }
+
+    .form-input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .form-input:disabled {
+      background: #f9fafb;
+      color: #9ca3af;
+    }
+
+    .submit-btn {
+      width: 100%;
+      padding: 12px 28px;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      background: #2563eb;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 8px;
+    }
+
+    .submit-btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    .submit-btn:disabled {
+      background: #93c5fd;
+      cursor: not-allowed;
+    }
+
+    /* ===== Error Message ===== */
+    .error-area {
+      display: none;
+      margin-bottom: 20px;
+    }
+
+    .error-area.visible {
+      display: block;
+    }
+
+    .error-msg {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: #991b1b;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    /* ===== Hint (研修用アカウント案内) ===== */
+    .hint-area {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .hint-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #6b7280;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .hint-list {
+      font-size: 13px;
+      color: #6b7280;
+      line-height: 1.8;
+    }
+
+    .hint-list code {
+      background: #f3f4f6;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    /* ===== Utility ===== */
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== ヘッダー（WebLayout mock） ===== -->
+  <header class="header">
+    <div class="header-title">
+      <span>Helpo</span>
+      <span style="font-weight: 400; font-size: 14px; opacity: 0.8;">AI社内ヘルプデスク</span>
+    </div>
+  </header>
+
+  <!-- ===== モックアップ状態切替コントロール ===== -->
+  <div class="mockup-controls">
+    <div class="mockup-controls-title">モックアップ状態切替</div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">基本状態</div>
+      <button class="mockup-btn active" onclick="setState('empty')">空っぽ（初期状態）</button>
+    </div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">エラーパターン</div>
+      <button class="mockup-btn" onclick="setState('invalid_credentials')">認証失敗（共通メッセージ）</button>
+      <button class="mockup-btn" onclick="setState('locked')">試行制限中（ロック）</button>
+      <button class="mockup-btn" onclick="setState('server_error')">サーバエラー（500）</button>
+    </div>
+  </div>
+
+  <!-- ===== メインコンテンツ ===== -->
+  <main class="main">
+    <div class="section">
+      <div class="section-title">ログイン</div>
+
+      <!-- エラーメッセージ（フォームの上） -->
+      <div id="error-area" class="error-area">
+        <div id="error-msg" class="error-msg"></div>
+      </div>
+
+      <form id="login-form" onsubmit="handleSubmit(event)">
+        <div class="form-group">
+          <label class="form-label" for="username">ユーザー名</label>
+          <input type="text" id="username" class="form-input" autocomplete="username" placeholder="user01" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">パスワード</label>
+          <input type="password" id="password" class="form-input" autocomplete="current-password" placeholder="password" />
+        </div>
+
+        <button id="submit-btn" type="submit" class="submit-btn">ログイン</button>
+      </form>
+
+      <!-- 研修用初期利用者の案内（モックアップのみ） -->
+      <div class="hint-area">
+        <div class="hint-title">研修用初期利用者</div>
+        <div class="hint-list">
+          一般利用者: <code>user01</code> / <code>password</code><br>
+          管理者　　: <code>admin01</code> / <code>password</code>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ===== ダミーの初期利用者（研修用） =====
+    var SEED_USERS = {
+      user01:  { password: 'password', role: 'user' },
+      admin01: { password: 'password', role: 'admin' }
+    };
+
+    // 遷移先: ai-helpdesk-chatのチャット機能モック画面
+    var CHAT_MOCKUP_URL = 'chat.html';
+
+    var ERROR_MESSAGES = {
+      invalid_credentials: 'ユーザー名またはパスワードが正しくありません。',
+      locked: 'ログイン試行回数が上限を超えたため、しばらくの間ログインできません。時間をおいて再度お試しください。',
+      server_error: 'システムエラーが発生しました。しばらくしてから再度お試しください。'
+    };
+
+    // ===== DOM要素参照 =====
+    var elForm       = document.getElementById('login-form');
+    var elUsername   = document.getElementById('username');
+    var elPassword   = document.getElementById('password');
+    var elErrorArea  = document.getElementById('error-area');
+    var elErrorMsg   = document.getElementById('error-msg');
+    var elSubmitBtn  = document.getElementById('submit-btn');
+
+    var currentState = 'empty';
+
+    // ===== エラー表示 =====
+    function showError(message) {
+      elErrorMsg.textContent = message;
+      elErrorArea.classList.add('visible');
+    }
+
+    function clearError() {
+      elErrorMsg.textContent = '';
+      elErrorArea.classList.remove('visible');
+    }
+
+    // ===== モックアップ状態切替（ボタン操作時のプレビュー用） =====
+    function setState(state) {
+      currentState = state;
+
+      var btns = document.querySelectorAll('.mockup-btn');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.remove('active');
+      }
+      var clickedBtn = event && event.target;
+      if (clickedBtn && clickedBtn.classList.contains('mockup-btn')) {
+        clickedBtn.classList.add('active');
+      }
+
+      clearError();
+
+      if (state !== 'empty' && ERROR_MESSAGES[state]) {
+        showError(ERROR_MESSAGES[state]);
+      }
+    }
+
+    // ===== ログイン処理（モック: SEED_USERSのみ照合） =====
+    function handleSubmit(event) {
+      event.preventDefault();
+      clearError();
+
+      // ボタンで選択中の疑似エラー状態を優先的に再現する
+      if (currentState === 'locked' || currentState === 'server_error') {
+        showError(ERROR_MESSAGES[currentState]);
+        return;
+      }
+
+      var username = elUsername.value.trim();
+      var password = elPassword.value;
+      var user = SEED_USERS[username];
+
+      if (!user || user.password !== password) {
+        // ユーザー名・パスワードいずれが誤りかを明かさない共通メッセージ
+        showError(ERROR_MESSAGES.invalid_credentials);
+        return;
+      }
+
+      // 認証成功: ai-helpdesk-chatのチャット機能モック画面へ遷移
+      elSubmitBtn.disabled = true;
+      window.location.href = CHAT_MOCKUP_URL;
+    }
+  </script>
+</body>
+</html>
