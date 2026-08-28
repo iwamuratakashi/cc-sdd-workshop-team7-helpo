@@ -6,7 +6,7 @@ ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする�
 FAQ検索と永続化はWeb process、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。
 
 ### Goals
-- `is_match=true`のFAQだけに根拠を限定し、生成成功・直接FAQ・窓口案内のいずれかへ必ず収束する。
+- `is_match=true`のFAQだけに根拠を限定し、`AI回答`・`FAQ直接回答`・`該当FAQなし`・`AI利用不可`・`サーバエラー`のいずれかへ必ず収束する。
 - timeout時に推論processとCPU負荷を停止させ、同一`request_id`の履歴を一件に保つ。
 - FAQ変更・削除後も回答時点の根拠を本人だけが再現できる。
 - offline、CPU-only、no-auto-downloadを採用記録とruntime境界で強制する。
@@ -177,18 +177,20 @@ sequenceDiagram
 1. 認証済み社員が1〜400文字のUTF-8フリーテキストで質問を入力・送信する。
 2. `FaqSearchService.search`がハイブリッド検索（意味検索＋キーワード検索）により質問の意図を理解し、上位FAQ候補を取得する（`top_k=5`）。
 3. `is_match=true`の候補のみを根拠として、ローカルLLMが短文回答を生成する。
-4. 画面上部にAIの回答を表示し、画面下部に出典FAQ（根拠FAQ一覧）を表示する。
+4. 回答エリアにAIの回答テキストと出典FAQ（根拠FAQ一覧）を一体表示する。
 
 #### 異常系ふるまい
 
-| 条件 | ふるまい | 表示内容 |
-|------|---------|---------|
-| 質問内容がFAQに存在しない（`no_match`） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内（根拠FAQセクションなし） |
-| 401文字以上の入力 | 処理・保存なしで入力エラーを返す | 入力エラーメッセージ（文字数超過）、送信済み入力内容を保持 |
-| 0文字（空または空白のみ）の入力 | 処理・保存なしで入力エラーを返す | 入力エラーメッセージ（必須入力） |
-| 未認証アクセス（チャット画面） | 認証ページへ303リダイレクト | エラーメッセージなし（リダイレクト） |
-| 未認証アクセス（API） | JSON 401を返す | 本文なし |
-| 他人の履歴へのアクセス（管理者含む） | 403 Forbiddenを返す | エラーメッセージ |
+| 条件 | 回答状態 | ふるまい | 表示内容 |
+|------|---------|---------|---------|
+| 質問内容がFAQに存在しない＋LLM利用可能 | `no_match`（該当FAQなし） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
+| 質問内容がFAQに存在しない＋LLM利用不可 | `ai_unavailable`（AI利用不可） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
+| FAQ検索機能が利用不能・予期しないエラー | `server_error`（サーバエラー） | 共通エラーメッセージを返す | サーバエラーメッセージ（内部詳細なし） |
+| 0文字（空または空白のみ）の入力 | （非保存）空入力エラー | 処理・保存なしで入力エラーを返す | 「質問を入力してください」、入力内容を保持 |
+| 401文字以上の入力 | （非保存）文字数超過エラー | 処理・保存なしで入力エラーを返す | 「質問は400文字以内で入力してください」、入力内容を保持 |
+| 未認証アクセス（チャット画面） | - | 認証ページへ303リダイレクト | エラーメッセージなし（リダイレクト） |
+| 未認証アクセス（API） | - | JSON 401を返す | 本文なし |
+| 他人の履歴へのアクセス（管理者含む） | - | 403 Forbiddenを返す | エラーメッセージ |
 
 #### 境界値
 
@@ -205,33 +207,38 @@ flowchart TD
     Accepted --> ExistingCheck
     ExistingCheck --> ExistingResult
     ExistingCheck --> Search
-    Search --> SearchUnavailable
+    Search --> ServerError
     Search --> NoMatch
     Search --> Matched
-    Matched --> LlmUnavailable
-    Matched --> Generation
-    Generation --> LlmTimeout
+    NoMatch --> LlmReadyCheck
+    LlmReadyCheck --> NoMatchStatus[NoMatch]
+    LlmReadyCheck --> AiUnavailable
+    Matched --> LlmAvailCheck
+    LlmAvailCheck --> DirectFaq
+    LlmAvailCheck --> Generation
+    Generation --> Timeout[Timeout]
+    Timeout --> DirectFaq
     Generation --> InvalidOutput
-    Generation --> Generated
+    Generation --> AiAnswer
     InvalidOutput --> DirectFaq
-    SearchUnavailable --> Persist
-    NoMatch --> Persist
-    LlmUnavailable --> Persist
-    LlmTimeout --> Persist
+    ServerError --> Persist
+    NoMatchStatus --> Persist
+    AiUnavailable --> Persist
     DirectFaq --> Persist
-    Generated --> Persist
+    AiAnswer --> Persist
 ```
 
-| Status | Deterministic condition | Stored answer | Stored sources |
-|--------|-------------------------|---------------|----------------|
-| `generated` | structured outputがparse、length、許可ID検証を通過 | 検証済み生成`answer` | 出力`source_ids`が指す実使用snapshotのみ、入力順 |
-| `direct_faq` | 生成結果が空、不正、too long、parse不能、未知ID | 直接fallback候補の登録`answer` | fallback候補1件 |
-| `no_match` | `has_match=false`または適合候補0 | 検証済み窓口案内 | 0件 |
-| `search_unavailable` | FAQ検索の既知利用不能・失敗 | 検証済み窓口案内 | 0件 |
-| `llm_unavailable` | manifest不一致、未設定、load失敗、停止 | 直接fallback候補の登録`answer` | fallback候補1件 |
-| `llm_timeout` | queueを含むdeadline超過 | 直接fallback候補の登録`answer` | fallback候補1件 |
+| Status | カテゴリ | Deterministic condition | Stored answer | Stored sources |
+|--------|---------|-------------------------|---------------|----------------|
+| `ai_answer` | 成功 | structured outputがparse、length、許可ID検証を通過 | 検証済み生成`answer` | 出力`source_ids`が指す実使用snapshotのみ、入力順 |
+| `direct_faq` | 成功 | LLM利用不能、timeout、または生成結果が空・不正・too long・parse不能・未知IDであり適合候補が存在 | 直接fallback候補の登録`answer` | fallback候補1件 |
+| `no_match` | 成功 | `has_match=false`または適合候補0であり、LLMが利用可能 | 検証済み窓口案内 | 0件 |
+| `ai_unavailable` | エラー | LLMが利用不能（manifest不一致、未設定、load失敗、停止）であり適合候補も存在しない | 検証済み窓口案内 | 0件 |
+| `server_error` | エラー | FAQ検索の既知利用不能・失敗、または予期しない処理エラー | 検証済み窓口案内 | 0件 |
 
-fallback候補は常に`confidence DESC, faq_id ASC`先頭の`is_match=true`候補である。検索成功後に適合候補があるため、LLM障害時に窓口案内へ分岐しない。
+- fallback候補は常に`confidence DESC, faq_id ASC`先頭の`is_match=true`候補である。検索成功後に適合候補があるため、LLM障害時に窓口案内へ分岐せず`direct_faq`へ収束する。
+- `no_match`と`ai_unavailable`は利用者へ同じ窓口案内を表示するが、statusでLLM可用性を区別し運用監視に活用する。
+- 入力バリデーションエラー（空入力エラー、文字数超過エラー）は回答処理・履歴保存を行わないため、persisted statusには含まない。クライアント側即時フィードバックとサーバー側422応答で処理する。
 
 ### worker lifecycle
 
@@ -264,24 +271,25 @@ erDiagram
 |-------------|---------|------------|------------|-------|
 | 1.1 | 質問受付と処理表示 | ChatRouter, ChatUI, ChatService | API, State | 生成sequence |
 | 1.2 | 同画面の最終結果 | ChatUI, ChatService | API | 状態flow |
-| 1.3 | 入力拒否・保存なし | ChatQuestionRequest, ChatRouter | API | 生成sequence |
-| 1.4 | 未認証保護 | ChatRouter, Auth | API | owner access |
-| 1.5 | 重複抑止 | ChatUI, ChatService, Repository | API, State | ExistingCheck |
+| 1.3 | 空入力拒否・保存なし | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
+| 1.4 | 文字数超過拒否・保存なし | ChatQuestionRequest, ChatRouter, ChatUI | API | 生成sequence |
+| 1.5 | 未認証保護 | ChatRouter, Auth | API | owner access |
+| 1.6 | 重複抑止 | ChatUI, ChatService, Repository | API, State | ExistingCheck |
 | 2.1 | FAQ typed result利用 | ChatService, FaqSearchService | Service | 生成sequence |
 | 2.2 | 適合候補限定 | GroundingPolicy | Service | 状態flow |
-| 2.3 | 適合なしは非生成 | ChatService | Service | 状態flow |
+| 2.3 | 適合なしは該当FAQなし | ChatService | Service | 状態flow |
 | 2.4 | 履歴・外部知識等を不使用 | GroundingPolicy, Worker | Service | worker境界 |
-| 2.5 | 検索失敗の安全案内 | ChatService | Service | 状態flow |
-| 3.1 | 根拠限定短文生成 | GroundingPolicy, Adapter | Service | 生成sequence |
+| 2.5 | 検索失敗のサーバエラー案内 | ChatService | Service | 状態flow |
+| 3.1 | 根拠限定短文AI回答生成 | GroundingPolicy, Adapter | Service | 生成sequence |
 | 3.2 | 外部送信禁止 | Adapter, ManifestValidator | Service | worker境界 |
 | 3.3 | Windows CPU-only | Worker, ManifestValidator | Service | worker lifecycle |
 | 3.4 | 採用・変更gate | ModelAdoptionManifest | State | worker lifecycle |
-| 3.5 | 不正出力を直接回答へ | GroundingPolicy, ChatService | Service | 状態flow |
-| 4.1 | LLM不能fallback | Adapter, ChatService | Service | 状態flow |
-| 4.2 | hard timeout fallback | Adapter, Worker | Service | worker lifecycle |
-| 4.3 | 根拠なし障害の窓口案内 | ChatService | Service | 状態flow |
-| 4.4 | 外部status保存表示 | ChatStatus, Repository, UI | API, State | 状態flow |
-| 4.5 | 未知例外の共通処理 | ChatService, ErrorHandler | Service | 生成sequence |
+| 3.5 | 不正出力をFAQ直接回答へ | GroundingPolicy, ChatService | Service | 状態flow |
+| 4.1 | LLM不能→FAQ直接回答 | Adapter, ChatService | Service | 状態flow |
+| 4.2 | timeout→FAQ直接回答 | Adapter, Worker | Service | worker lifecycle |
+| 4.3 | LLM不能＋適合なし→AI利用不可 | ChatService | Service | 状態flow |
+| 4.4 | 検索不能・予期しないエラー→サーバエラー | ChatService, ErrorHandler | Service | 状態flow |
+| 4.5 | 7種の回答状態パターン定義 | ChatStatus, Repository, UI | API, State | 状態flow |
 | 5.1 | 根拠全項目表示 | ChatSourceResponse, UI | API | detail |
 | 5.2 | 実使用FAQだけ表示 | GroundingPolicy, Repository | State | 生成sequence |
 | 5.3 | 窓口案内は根拠なし | ChatAnswerResponse, UI | API | 状態flow |
@@ -306,15 +314,15 @@ erDiagram
 
 | Component | Domain/Layer | Intent | Req Coverage | Key Dependencies | Contracts |
 |-----------|--------------|--------|--------------|------------------|-----------|
-| ChatSettings | Config | local制限と窓口文 | 1.3, 3.3, 4.2, 8.2 | Foundation config extension (Inbound/External P0) | State |
+| ChatSettings | Config | local制限と窓口文 | 1.3, 1.4, 3.3, 4.2, 8.2 | Foundation config extension (Inbound/External P0) | State |
 | ManifestValidator | Runtime gate | 採用証跡とhash照合 | 3.2-3.4, 8.1, 8.5 | ChatSettings (Inbound P0), local artifact files (External P0) | Service, State |
 | GroundingPolicy | Domain | source選択と出力検証 | 2.2-2.4, 3.1, 3.5, 5.2 | FaqCandidate DTO (Inbound P0) | Service |
 | LocalLlmAdapter | Runtime | deadlineとworker lifecycle | 3.1-3.5, 4.1-4.2, 8.1-8.5 | `run_local_llm_worker` spawn target (Outbound P0), ManifestValidator (Outbound P0) | Service, State |
 | LocalLlmWorker | Process | CPU runtime実行 | 3.1-3.3, 4.2, 8.3 | approved local runtime (External P0) | Service |
-| ChatHistoryRepository | Data | 冪等・owner履歴・原子保存 | 1.5, 5.4, 6.1-6.5, 7.1-7.4 | `Session` (Outbound P0), `BaseEntity` (Inbound P0) | Service, State |
-| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 1.5, 2.1-2.5, 3.5, 4.1-4.5, 5.3, 6.1 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0), ChatHistoryRepository (Outbound P0) | Service |
-| ChatRouter | API/Web | auth、owner、HTTP | 1.1-1.5, 5.1-6.6 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
-| ChatUI | Presentation | chat・履歴・escaped表示 | 1.1-1.5, 5.1-5.4, 6.2-6.3 | `WebLayout` (Outbound P0) | State |
+| ChatHistoryRepository | Data | 冪等・owner履歴・原子保存 | 1.6, 5.4, 6.1-6.5, 7.1-7.4 | `Session` (Outbound P0), `BaseEntity` (Inbound P0) | Service, State |
+| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 1.6, 2.1-2.5, 3.5, 4.1-4.5, 5.3, 6.1 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0), ChatHistoryRepository (Outbound P0) | Service |
+| ChatRouter | API/Web | auth、owner、HTTP | 1.1-1.6, 5.1-6.6 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
+| ChatUI | Presentation | chat・履歴・escaped表示 | 1.1-1.6, 5.1-5.4, 6.2-6.3 | `WebLayout` (Outbound P0) | State |
 
 - **依存方向・重要度の凡例**: `Inbound` = 外部または上流からこのcomponentへcall/dataが入る; `Outbound` = このcomponentが依存先をcallする; `External` = process外のruntime/file/system; `P0` = MVP必須, `P1/P2` = 将来優先度。
 
@@ -441,9 +449,10 @@ class InvalidGeneratedOutput(Exception):
   - `LocalLlmAdapter.generate`: `ManifestValidationError`、load失敗、worker停止 → `LlmUnavailable`; queue待機を含むwall-clock deadline超過 → `LlmTimeout`。
   - `ChatService.ask`: 既知のFAQ検索失敗 → `FaqSearchUnavailable`; persisted行に解決できないin-flight冪等競合 → `IdempotentConflict`。
 - `ChatService.ask`変換規則:
-  - `FaqSearchUnavailable` → `search_unavailable`。
-  - `LlmUnavailable` → `llm_unavailable`。
-  - `LlmTimeout` → `llm_timeout`。
+  - `FaqSearchUnavailable` → `server_error`。
+  - `LlmUnavailable`（適合候補あり） → `direct_faq`。
+  - `LlmUnavailable`（適合候補なし） → `ai_unavailable`。
+  - `LlmTimeout` → `direct_faq`（適合候補が存在するため常にFAQ直接回答へ収束）。
   - `InvalidGeneratedOutput` → `direct_faq`。
   - 未知例外とDB障害はrollback後にFoundation `ErrorHandler`へ委譲しgeneric 500とする; persisted status行には変換しない。
 
@@ -467,8 +476,7 @@ class ChatHistoryRepository(BaseRepository):
 
 ```python
 ChatStatus = Literal[
-    "generated", "direct_faq", "no_match", "search_unavailable",
-    "llm_unavailable", "llm_timeout"
+    "ai_answer", "direct_faq", "no_match", "ai_unavailable", "server_error"
 ]
 
 class ChatService:
@@ -478,7 +486,7 @@ class ChatService:
 ```
 
 - `FaqSearchService`、`GroundingPolicy`、`LocalLlmAdapter`、Repositoryを直接注入する。検索は常に`top_k=5`で、configurable FAQ thresholdを参照しない。
-- 検索・推論は保存transaction外、最終履歴とsnapshotだけを短いtransactionで保存する。既知障害は`FaqSearchUnavailable`→`search_unavailable`、`LlmUnavailable`→`llm_unavailable`、`LlmTimeout`→`llm_timeout`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換してcommitする。未知/DB障害はrollbackして再送出しFoundation 500へ委譲する。`IdempotentConflict`は再試行可能なHTTP 409としてrouterへ伝播し、新規履歴行を作らない。
+- 検索・推論は保存transaction外、最終履歴とsnapshotだけを短いtransactionで保存する。既知障害は`FaqSearchUnavailable`→`server_error`、`LlmUnavailable`（適合候補あり）→`direct_faq`、`LlmUnavailable`（適合候補なし）→`ai_unavailable`、`LlmTimeout`→`direct_faq`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換してcommitする。未知/DB障害はrollbackして再送出しFoundation 500へ委譲する。`IdempotentConflict`は再試行可能なHTTP 409としてrouterへ伝播し、新規履歴行を作らない。
 - logはrequest correlation hash、status、history ID、owner ID、duration、worker lifecycle eventだけ。質問・回答・FAQ・prompt・path・他利用者履歴を出さない。
 
 ### API and Presentation
@@ -558,19 +566,19 @@ class HistoryDetailResponse(ChatAnswerResponse):
 ┌──────────────────────────────────┐
 │ ヘッダー（共通レイアウト）           │
 ├──────────────────────────────────┤
-│ ■ エラーメッセージ表示エリア         │ ← バリデーションエラー時のみ表示
-├──────────────────────────────────┤
-│ ■ 回答表示エリア（上部）            │ ← 回答テキストを表示
+│                                  │
+│ ■ 回答表示エリア                   │ ← 回答と出典を一体表示
 │   回答状態ラベル                    │
-├──────────────────────────────────┤
-│ ■ 出典FAQ表示エリア（下部）         │ ← 根拠FAQの一覧を表示
+│   回答テキスト                      │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
+│   出典FAQ一覧                      │ ← 回答エリア内に出典を表示
 │   FAQ ID / 質問文 / 回答文 / 類似度  │
-├──────────────────────────────────┤
-│ ■ 質問入力エリア                    │
-│   [テキストエリア          ] (0/400) │
-│   [送信ボタン]                      │
-├──────────────────────────────────┤
-│ 履歴一覧へのリンク                   │
+│                                  │
+├──────────────────────────────────┤ ← 画面下部に固定表示
+│ ■ 質問入力エリア（画面下部固定）      │
+│ [テキストエリア        ] [送信]     │ ← ボタンは入力欄の右に配置
+│ (0/400)                           │
+│ エラーメッセージ                     │ ← フォームのすぐ下に表示
 └──────────────────────────────────┘
 ```
 
@@ -578,29 +586,29 @@ class HistoryDetailResponse(ChatAnswerResponse):
 
 | No | 項目名 | 項目ID | 種別 | 型 | 初期値 | フォーマット / 備考 | 表示条件 |
 |----|--------|--------|------|-----|--------|-------------------|---------|
-| 1 | 質問入力欄 | `question` | textarea | 文字列（UTF-8） | 空文字 | フリーテキスト、最大400文字 | 常時表示 |
+| 1 | 質問入力欄 | `question` | textarea | 文字列（UTF-8） | 空文字 | フリーテキスト、最大400文字。画面下部に固定表示する | 常時表示 |
 | 2 | 文字数カウンター | `char_count` | テキスト | - | `0 / 400` | `{現在文字数} / 400` | 常時表示 |
-| 3 | 送信ボタン | `submit_btn` | button | - | 活性状態 | ラベル: 「送信」 | 常時表示 |
+| 3 | 送信ボタン | `submit_btn` | button | - | 活性状態 | ラベル: 「送信」。質問入力欄の右に配置する | 常時表示 |
 | 4 | 処理中インジケータ | `loading` | テキスト | - | 非表示 | 「処理中...」 | 送信後〜回答受信前 |
-| 5 | エラーメッセージ | `error_msg` | テキスト | - | 非表示 | 赤文字等のエラースタイル | バリデーションエラー時 |
+| 5 | エラーメッセージ | `error_msg` | テキスト | - | 非表示 | 赤文字等のエラースタイル。質問フォームのすぐ下に表示する | バリデーションエラー時・サーバエラー時 |
 | 6 | 回答テキスト | `answer_text` | テキスト | - | 非表示 | HTMLエスケープ済みテキスト | 回答取得後 |
 | 7 | 回答状態ラベル | `status_label` | テキスト | - | 非表示 | 下記の状態ラベル対応表参照 | 回答取得後 |
-| 8 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
-| 9 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言 | `no_match` / `search_unavailable` 時 |
-| 10 | 窓口案内メッセージ | `guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み） | `no_match` / `search_unavailable` 時 |
-| 11 | 履歴一覧リンク | `history_link` | リンク | - | `/chat/history` | ラベル: 「履歴一覧」 | 常時表示 |
-| 12 | リクエストID | `request_id` | hidden | UUID v4 | 自動生成 | 送信ごとに1回生成、リトライ時は同じ値を再利用 | 非表示 |
+| 8 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 回答エリア内に表示。各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
+| 9 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言。回答エリア内に表示する | `no_match` / `ai_unavailable` / `server_error` 時 |
+| 10 | 窓口案内メッセージ | `guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み）。回答エリア内に表示する | `no_match` / `ai_unavailable` 時 |
+| 11 | リクエストID | `request_id` | hidden | UUID v4 | 自動生成 | 送信ごとに1回生成、リトライ時は同じ値を再利用 | 非表示 |
 
 **状態ラベル対応表**
 
-| status値 | 表示ラベル |
-|----------|-----------|
-| `generated` | AI回答 |
-| `direct_faq` | FAQ直接回答 |
-| `no_match` | 該当FAQなし |
-| `search_unavailable` | 検索利用不可 |
-| `llm_unavailable` | AI利用不可 |
-| `llm_timeout` | AI応答タイムアウト |
+| status値 | カテゴリ | 表示ラベル |
+|----------|---------|-----------|
+| `ai_answer` | 成功 | AI回答 |
+| `direct_faq` | 成功 | FAQ直接回答 |
+| `no_match` | 成功 | 該当FAQなし |
+| `ai_unavailable` | エラー | AI利用不可 |
+| `server_error` | エラー | サーバエラー |
+| （クライアント側のみ） | エラー | 空入力エラー |
+| （クライアント側のみ） | エラー | 文字数超過エラー |
 
 **アクション・イベント**
 
@@ -609,24 +617,25 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | A1 | 質問入力（キー入力時） | `question`, `char_count` | 入力文字数をリアルタイムでカウンターに反映する |
 | A2 | 送信ボタン押下 | `submit_btn` | バリデーション実行。成功なら `POST /api/chat` を送信する |
 | A3 | 送信開始 | `submit_btn`, `loading` | 送信ボタンを非活性にし、処理中インジケータを表示する |
-| A4 | 回答受信（`generated` / `direct_faq`） | `answer_text`, `sources` | 画面上部に回答テキスト、画面下部に出典FAQ一覧を表示する |
-| A5 | 回答受信（`no_match` / `search_unavailable`） | `no_source_msg`, `guidance` | 画面上部に「出典が見つかりません」＋窓口案内を表示する。出典エリアは表示しない |
-| A6 | 回答受信（`llm_unavailable` / `llm_timeout`） | `answer_text`, `sources` | 画面上部にFAQ直接回答、画面下部にfallback出典1件を表示する |
+| A4 | 回答受信（`ai_answer` / `direct_faq`） | `answer_text`, `sources` | 回答エリアに回答テキストと出典FAQ一覧を一体表示する |
+| A5 | 回答受信（`no_match` / `ai_unavailable`） | `no_source_msg`, `guidance` | 回答エリアに「出典が見つかりません」＋窓口案内を表示する。出典一覧は表示しない |
+| A6 | 回答受信（`server_error`） | `error_msg` | 回答エリアにサーバエラーメッセージを表示する。内部詳細は表示しない |
 | A7 | 回答受信後 | `submit_btn`, `loading`, `request_id` | 送信ボタンを再活性にし、処理中を非表示にし、新しいUUID v4を生成する |
-| A8 | バリデーションエラー | `error_msg`, `question` | エラーメッセージを表示する。入力内容は保持し修正可能にする |
-| A9 | 409応答（競合） | - | 同一 `request_id` で自動リトライする |
-| A10 | 500応答（システムエラー） | `error_msg` | 共通エラーメッセージを表示する（内部詳細は表示しない） |
+| A8 | バリデーションエラー（空入力） | `error_msg`, `question` | 質問フォームのすぐ下に空入力エラーメッセージを表示する。入力内容は保持し修正可能にする |
+| A9 | バリデーションエラー（文字数超過） | `error_msg`, `question` | 質問フォームのすぐ下に文字数超過エラーメッセージを表示する。入力内容は保持し修正可能にする |
+| A10 | 409応答（競合） | - | 同一 `request_id` で自動リトライする |
+| A11 | 500応答（システムエラー） | `error_msg` | 質問フォームのすぐ下に共通エラーメッセージを表示する（内部詳細は表示しない） |
 
 **バリデーション**
 
 | No | 対象 | ルール | エラーメッセージ | チェックタイミング |
 |----|------|--------|----------------|-----------------|
-| V1 | `question` | 必須入力（trim後1文字以上） | 「質問を入力してください」 | 送信ボタン押下時（クライアント側） |
-| V2 | `question` | 最大400文字（trim後） | 「質問は400文字以内で入力してください」 | 送信ボタン押下時（クライアント側） |
+| V1 | `question` | 必須入力（trim後1文字以上） | 「質問を入力してください」（空入力エラー） | 送信ボタン押下時（クライアント側） |
+| V2 | `question` | 最大400文字（trim後） | 「質問は400文字以内で入力してください」（文字数超過エラー） | 送信ボタン押下時（クライアント側） |
 | V3 | `question` | trim後1〜400文字 | 422エラー | サーバー側（`ChatQuestionRequest`バリデーション） |
 | V4 | `request_id` | 有効なUUID形式 | 422エラー | サーバー側 |
 
-- V1〜V2はクライアント側で即時フィードバックし、送信を抑止する。
+- V1〜V2はクライアント側で即時フィードバックし、送信を抑止する。エラーメッセージは質問フォームのすぐ下に表示する。
 - V3〜V4はサーバー側でも必ず再検証する（クライアント検証のバイパス対策）。
 - バリデーションエラー時は処理・履歴保存を一切行わない。
 
@@ -732,8 +741,8 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | 5-3 | FAQ回答文 | - | テキスト | 文字列 | - | スナップショット値（HTMLエスケープ済み） | 各出典 |
 | 5-4 | 類似度 | - | テキスト | 小数 | - | 小数2桁表示（例: `0.85`）、範囲: 0.00〜1.00 | 各出典 |
 | 5-5 | 削除済みラベル | - | テキスト | - | 非表示 | 「（削除済み）」 | 元FAQが削除済みの場合（`is_deleted=true`） |
-| 6 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言 | `no_match` / `search_unavailable` 時 |
-| 7 | 窓口案内メッセージ | `detail_guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み） | `no_match` / `search_unavailable` 時 |
+| 6 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言 | `no_match` / `ai_unavailable` / `server_error` 時 |
+| 7 | 窓口案内メッセージ | `detail_guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み） | `no_match` / `ai_unavailable` 時 |
 | 8 | 一覧に戻るリンク | `back_link` | リンク | - | `/chat/history` | ラベル: 「一覧に戻る」 | 常時表示 |
 
 **アクション・イベント**
@@ -771,7 +780,7 @@ class HistoryDetailResponse(ChatAnswerResponse):
 | request_id | CHAR(36) | NOT NULL |
 | question | TEXT | NOT NULL |
 | answer | TEXT | NOT NULL |
-| status | VARCHAR(32) | NOT NULL、six-value CHECK |
+| status | VARCHAR(32) | NOT NULL、five-value CHECK (`ai_answer`, `direct_faq`, `no_match`, `ai_unavailable`, `server_error`) |
 | created_at | DATETIME | NOT NULL、BaseEntity |
 | updated_at | DATETIME | NOT NULL、BaseEntity |
 
@@ -800,7 +809,7 @@ class HistoryDetailResponse(ChatAnswerResponse):
 ### Error Strategy
 - 422: UUID/schema、question、limit/offset、local startup設定不正。質問処理・履歴保存を開始しない。
 - 401/303: API/HTML別の上流認証挙動。403: owner不一致。404: 履歴不存在。409: 稀な同一key in-flight競合のみ。
-- FAQ既知障害、LLM未準備、timeout、invalid outputは正常なpersisted fallbackでHTTP 200。
+- FAQ既知障害→`server_error`、LLM未準備（適合あり）→`direct_faq`、LLM未準備（適合なし）→`ai_unavailable`、timeout→`direct_faq`、invalid output→`direct_faq`は正常なpersisted fallbackでHTTP 200。
 - DB/未知例外はrollbackしFoundation汎用500へ委譲し、内部詳細をresponseへ出さない。
 
 ### Monitoring
@@ -813,10 +822,10 @@ class HistoryDetailResponse(ChatAnswerResponse):
 
 | IDs | Required verification |
 |-----|-----------------------|
-| 1.1-1.5 | 処理中→同画面結果、空/too-long無保存、HTML 303/API 401、同一UUID連打・retryが同じhistory IDで一行のみ |
+| 1.1-1.6 | 処理中→同画面結果、空入力エラー無保存、文字数超過エラー無保存、HTML 303/API 401、同一UUID連打・retryが同じhistory IDで一行のみ |
 | 2.1-2.5 | 正規FAQ DTO、`top_k=5`、`is_match=true`だけ、has-match不整合も安全側、履歴/tools/外部知識なし、検索失敗案内 |
 | 3.1-3.5 | short structured generation、no-network、Windows CPU、未承認artifact拒否、空/parse/too-long/invalid source ID fallback |
-| 4.1-4.5 | load停止/不能、hard timeout、根拠有無別fallback、全six status、未知例外が共通500 |
+| 4.1-4.5 | load停止/不能→FAQ直接回答、hard timeout→FAQ直接回答、LLM不能＋適合なし→AI利用不可、検索不能→サーバエラー、全5 persisted status＋2 validation error、未知例外が共通500 |
 | 5.1-5.4 | source全field、実引用のみ、案内sources空、detail snapshot再現 |
 | 6.1-6.6 | 原子保存、owner一覧/詳細、adminも他人403、再起動保持、共有/export/横断endpointなし |
 | 7.1-7.4 | snapshot全field、FAQ更新不変、削除時SET NULLと削除表示、FAQ更新削除成功 |
@@ -824,19 +833,19 @@ class HistoryDetailResponse(ChatAnswerResponse):
 
 ### Unit Tests
 - `GroundingPolicy`: stable tie-break、`is_match=false`除外、質問/FAQ内のmalicious prompt injectionをdata扱い、unknown/duplicate source ID、parse失敗、空、token/char超過を拒否する（2.2-2.4, 3.1, 3.5, 5.2）。
-- `ChatService`: 表のsix statesごとにanswer/sourceが厳密に一致し、search/LLM障害時に直接fallback選択を再計算しない（2.3, 2.5, 4.1-4.4）。
+- `ChatService`: 5 persisted statusごとにanswer/sourceが厳密に一致し、search/LLM障害時に直接fallback選択を再計算しない（2.3, 2.5, 4.1-4.4）。
 - `ChatSettings`/manifest: control character、長さ、hash/version/license/evidence/approved不一致をfail-closedにする（3.4, 8.2, 8.5）。
-- Repository: immutable snapshot API、stable pagination、unique violation再読、transaction rollbackでhistory/sourceとも0件（1.5, 6.1, 7.1）。
+- Repository: immutable snapshot API、stable pagination、unique violation再読、transaction rollbackでhistory/sourceとも0件（1.6, 6.1, 7.1）。
 
 ### Integration Tests
-- 同一`request_id`を逐次・同時送信し既存persisted responseを再利用、二行目を作らずUI disableなしでも成立する（1.5）。
-- API/HTML認証差、一般userとadminのowner isolation、一覧SQLにも他人が混入しないことを確認する（1.4, 6.2-6.4）。
+- 同一`request_id`を逐次・同時送信し既存persisted responseを再利用、二行目を作らずUI disableなしでも成立する（1.6）。
+- API/HTML認証差、一般userとadminのowner isolation、一覧SQLにも他人が混入しないことを確認する（1.5, 6.2-6.4）。
 - FAQ更新後は旧snapshot、削除後はnullable FKと`faq_id_at_answer`を保持し、FAQ update/delete自体を妨げない（5.4, 7.1-7.4）。
 - 保存途中failure injectionでrollback、未知例外は本文なし500、再起動後に履歴を復元する（4.5, 6.1, 6.5）。
-- socket/networkをdenyし、repo ID/URL/API client利用がなくgeneratedまたは安全fallbackへ収束する（3.2, 8.1）。
+- socket/networkをdenyし、repo ID/URL/API client利用がなく`ai_answer`または安全fallbackへ収束する（3.2, 8.1）。
 
 ### E2E and Windows Adoption Tests
-- login→UUID質問→処理中→escaped回答/source→履歴一覧→詳細、空/too-long修正表示を確認する（1.1-1.5, 5.1-5.4）。
+- login→UUID質問→処理中→escaped回答/source→履歴一覧→詳細、空入力エラー・文字数超過エラーの修正表示をフォーム下に確認する（1.1-1.6, 5.1-5.4）。
 - malicious FAQ HTML/scriptとprompt命令が実行・解釈されず、invalid generated source IDが直接FAQへ退避する（3.5, 5.2）。
 - GPUなし対象Windows CPUでqueue待機込みtimeoutを発生させ、取消/grace/terminate後にprocess消滅とCPU収束、clean workerで次要求成功を計測する（4.2, 8.3）。
 - 採用候補ごとにoffline起動、memory、load、P50/P95、max token/char、timeout-stop evidenceを取得し、fresh official license/runtime確認結果とともにmanifestへ記録する。承認前は`is_ready=false`を確認する（3.3-3.4, 8.1, 8.5）。
