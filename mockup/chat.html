@@ -213,6 +213,35 @@
       font-weight: 600;
     }
 
+    /* ===== Empty State (初期表示) ===== */
+    .empty-state {
+      display: none;
+      text-align: center;
+      padding: 48px 24px;
+      color: #9ca3af;
+    }
+
+    .empty-state.visible {
+      display: block;
+    }
+
+    .empty-state-icon {
+      font-size: 40px;
+      margin-bottom: 16px;
+    }
+
+    .empty-state-msg {
+      font-size: 18px;
+      font-weight: 600;
+      color: #6b7280;
+      margin-bottom: 8px;
+    }
+
+    .empty-state-sub {
+      font-size: 14px;
+      color: #9ca3af;
+    }
+
     /* ===== Loading ===== */
     .loading-area {
       display: none;
@@ -428,6 +457,13 @@
   <!-- ===== メインコンテンツ ===== -->
   <main class="main">
 
+    <!-- 初期表示（質問未送信） -->
+    <div id="empty-state" class="empty-state">
+      <div class="empty-state-icon">💬</div>
+      <div class="empty-state-msg">質問してください</div>
+      <div class="empty-state-sub">下の入力欄に質問を入力して「送信」ボタンを押してください</div>
+    </div>
+
     <!-- 読み込み中 -->
     <div id="loading-area" class="loading-area section">
       <div class="loading-indicator">
@@ -568,6 +604,7 @@
 
 
     // ===== DOM要素参照 =====
+    var elEmptyState    = document.getElementById('empty-state');
     var elCommErrorArea = document.getElementById('comm-error-area');
     var elCommErrorMsg  = document.getElementById('comm-error-msg');
     var elErrorArea    = document.getElementById('error-area');
@@ -601,7 +638,7 @@
       return div.innerHTML;
     }
 
-    // ===== 全エリアリセット =====
+    // ===== 全エリアリセット（empty_state は触らない：送信開始時に個別に非表示にする） =====
     function resetAll() {
       elCommErrorArea.classList.remove('visible');
       elCommErrorMsg.textContent = '';
@@ -685,15 +722,17 @@
 
       switch (state) {
         case 'empty':
-          // 初期状態: 何も表示しない
+          // 初期状態: 「質問してください」を表示
           elQuestion.value = '';
           elCharCount.textContent = '0 / 400';
           elCharCount.classList.remove('over-limit');
+          elEmptyState.classList.add('visible');
           break;
 
         case 'loading':
           elQuestion.value = '有給休暇の申請方法を教えてください';
           elCharCount.textContent = elQuestion.value.length + ' / 400';
+          elEmptyState.classList.remove('visible');
           elSubmitBtn.disabled = true;
           elQuestion.disabled = true;
           elLoadingArea.classList.add('visible');
@@ -765,7 +804,8 @@
         return;
       }
 
-      // 処理中を表示 → 1.5秒後にダミー回答を表示
+      // 送信開始: empty_state を非表示にし（一度消したら再表示しない）、処理中を表示
+      elEmptyState.classList.remove('visible');
       elSubmitBtn.disabled = true;
       elQuestion.disabled = true;
       elLoadingArea.classList.add('visible');

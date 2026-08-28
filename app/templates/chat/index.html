@@ -1,0 +1,475 @@
+{% extends "_page_base.html" %}
+
+{% block title %}AIヘルプデスク - チャット{% endblock %}
+
+{% block header_extra %}
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Meiryo", "Noto Sans JP", sans-serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: #1a1a1a;
+    background: #f5f5f5;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ===== Main Container ===== */
+  .chat-main {
+    max-width: 960px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 32px 24px;
+    flex: 1;
+    padding-bottom: 200px;
+  }
+
+  /* ===== Section shared ===== */
+  .chat-section {
+    background: #fff;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 24px;
+    border: 1px solid #e5e7eb;
+  }
+
+  .section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #6b7280;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* ===== Communication Error (画面上部・ヘッダー直下) ===== */
+  .comm-error-area { display: none; }
+  .comm-error-area.visible { display: block; }
+  .comm-error-msg {
+    max-width: 960px;
+    margin: 16px auto 0;
+    padding: 12px 24px;
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    border-radius: 8px;
+    color: #991b1b;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.7;
+  }
+
+  /* ===== Loading ===== */
+  .loading-area { display: none; }
+  .loading-area.visible { display: block; }
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 24px;
+    color: #4b5563;
+    font-size: 16px;
+  }
+  .loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===== Answer Area ===== */
+  .answer-area { display: none; }
+  .answer-area.visible { display: block; }
+  .answer-text {
+    font-size: 16px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .status-label {
+    display: inline-block;
+    margin-bottom: 12px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .status-label.ai_answer      { background: #dbeafe; color: #1e40af; }
+  .status-label.direct_faq     { background: #e0e7ff; color: #3730a3; }
+  .status-label.no_match       { background: #fef3c7; color: #92400e; }
+  .status-label.ai_unavailable { background: #fee2e2; color: #991b1b; }
+
+  /* ===== Source FAQ Area ===== */
+  .source-area { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; }
+  .source-area.visible { display: block; }
+  .source-table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.7; }
+  .source-table th {
+    background: #f9fafb;
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 2px solid #e5e7eb;
+    font-weight: 600;
+    color: #374151;
+    white-space: nowrap;
+  }
+  .source-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #f3f4f6;
+    vertical-align: top;
+    color: #1a1a1a;
+  }
+  .source-table tr:last-child td { border-bottom: none; }
+  .confidence-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #ecfdf5;
+    color: #065f46;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* ===== No Source ===== */
+  .no-source-area { display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; }
+  .no-source-area.visible { display: block; }
+  .no-source-msg { font-size: 16px; color: #92400e; font-weight: 600; }
+
+  /* ===== Empty State (初期表示) ===== */
+  .empty-state { display: block; text-align: center; padding: 48px 24px; color: #9ca3af; }
+  .empty-state.hidden-state { display: none; }
+  .empty-state-icon { font-size: 40px; margin-bottom: 16px; }
+  .empty-state-msg { font-size: 18px; font-weight: 600; color: #6b7280; margin-bottom: 8px; }
+  .empty-state-sub { font-size: 14px; color: #9ca3af; }
+
+  /* ===== Question Input Area (画面下部固定) ===== */
+  .question-fixed {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #fff;
+    border-top: 1px solid #e5e7eb;
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
+    z-index: 100;
+  }
+  .question-inner { max-width: 960px; margin: 0 auto; padding: 10px 24px; }
+  .question-row { display: flex; gap: 8px; align-items: flex-end; }
+  .question-textarea {
+    flex: 1;
+    min-height: 40px;
+    max-height: 120px;
+    padding: 8px 12px;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.6;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    resize: vertical;
+    color: #1a1a1a;
+    background: #fff;
+    transition: border-color 0.15s;
+  }
+  .question-textarea:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+  }
+  .question-textarea:disabled { background: #f9fafb; color: #9ca3af; }
+  .submit-btn {
+    width: auto;
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    background: #2563eb;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+    height: 40px;
+    margin-top: 0;
+  }
+  .submit-btn:hover:not(:disabled) { background: #1d4ed8; }
+  .submit-btn:disabled { background: #93c5fd; cursor: not-allowed; }
+  .question-meta { display: flex; justify-content: flex-end; align-items: center; margin-top: 4px; }
+  .char-counter { font-size: 12px; color: #9ca3af; }
+  .char-counter.over-limit { color: #dc2626; font-weight: 600; }
+
+  /* ===== Validation Error (フォームのすぐ上) ===== */
+  .error-area { display: none; }
+  .error-area.visible { display: block; }
+  .error-msg {
+    background: #fef2f2;
+    border: 1px solid #fca5a5;
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: #991b1b;
+    font-size: 14px;
+    line-height: 1.7;
+    margin-bottom: 8px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 通信エラー表示エリア（ヘッダー直下） -->
+<div id="comm-error-area" class="comm-error-area">
+  <div id="comm-error-msg" class="comm-error-msg"></div>
+</div>
+
+<main class="chat-main">
+
+  <!-- 初期表示（質問未送信） -->
+  <div id="empty-state" class="empty-state">
+    <div class="empty-state-icon">💬</div>
+    <div class="empty-state-msg">ご質問をどうぞ</div>
+    <div class="empty-state-sub">下の入力欄に質問を入力して「送信」ボタンを押してください</div>
+  </div>
+
+  <!-- 処理中インジケータ -->
+  <div id="loading-area" class="loading-area chat-section">
+    <div class="loading-indicator">
+      <div class="loading-spinner"></div>
+      <span>処理中...</span>
+    </div>
+  </div>
+
+  <!-- 回答表示エリア（回答＋出典一体表示） -->
+  <div id="answer-area" class="answer-area chat-section">
+    <div>
+      <span id="status-label" class="status-label"></span>
+    </div>
+    <div id="answer-text" class="answer-text"></div>
+
+    <!-- 出典FAQ一覧 -->
+    <div id="source-area" class="source-area">
+      <div class="section-title">出典FAQ</div>
+      <table class="source-table">
+        <thead>
+          <tr>
+            <th>FAQ ID</th>
+            <th>質問文</th>
+            <th>回答文</th>
+            <th>類似度</th>
+          </tr>
+        </thead>
+        <tbody id="source-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- 出典なし -->
+    <div id="no-source-area" class="no-source-area">
+      <div class="no-source-msg">出典が見つかりません</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- 質問入力エリア（画面下部固定） -->
+<div class="question-fixed">
+  <div class="question-inner">
+    <!-- バリデーションエラー（フォームのすぐ上） -->
+    <div id="error-area" class="error-area">
+      <div id="error-msg" class="error-msg"></div>
+    </div>
+    <div class="question-row">
+      <textarea
+        id="question"
+        class="question-textarea"
+        placeholder="質問を入力してください..."
+        rows="1"
+      ></textarea>
+      <button id="submit-btn" class="submit-btn">送信</button>
+    </div>
+    <div class="question-meta">
+      <div id="char-count" class="char-counter">0 / {{ max_question_chars }}</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var MAX_CHARS = {{ max_question_chars }};
+  var SERVER_ERROR_MESSAGE = {{ server_error_message | tojson }};
+
+  var STATUS_LABELS = {
+    ai_answer:      'AI回答',
+    direct_faq:     'FAQ直接回答',
+    no_match:       '該当FAQなし',
+    ai_unavailable: 'AI利用不可'
+  };
+
+  // DOM 参照
+  var elEmptyState    = document.getElementById('empty-state');
+  var elCommErrorArea = document.getElementById('comm-error-area');
+  var elCommErrorMsg  = document.getElementById('comm-error-msg');
+  var elErrorArea     = document.getElementById('error-area');
+  var elErrorMsg      = document.getElementById('error-msg');
+  var elLoadingArea   = document.getElementById('loading-area');
+  var elAnswerArea    = document.getElementById('answer-area');
+  var elAnswerText    = document.getElementById('answer-text');
+  var elStatusLabel   = document.getElementById('status-label');
+  var elSourceArea    = document.getElementById('source-area');
+  var elSourceTbody   = document.getElementById('source-tbody');
+  var elNoSourceArea  = document.getElementById('no-source-area');
+  var elQuestion      = document.getElementById('question');
+  var elCharCount     = document.getElementById('char-count');
+  var elSubmitBtn     = document.getElementById('submit-btn');
+
+  // 文字数カウンター
+  elQuestion.addEventListener('input', function () {
+    var len = elQuestion.value.length;
+    elCharCount.textContent = len + ' / ' + MAX_CHARS;
+    if (len > MAX_CHARS) {
+      elCharCount.classList.add('over-limit');
+    } else {
+      elCharCount.classList.remove('over-limit');
+    }
+  });
+
+  // 全エリアリセット（empty_state は触らない：送信開始時に個別に非表示にする）
+  function resetAll() {
+    elCommErrorArea.classList.remove('visible');
+    elCommErrorMsg.textContent  = '';
+    elErrorArea.classList.remove('visible');
+    elErrorMsg.textContent      = '';
+    elLoadingArea.classList.remove('visible');
+    elAnswerArea.classList.remove('visible');
+    elSourceArea.classList.remove('visible');
+    elNoSourceArea.classList.remove('visible');
+    elAnswerText.textContent    = '';
+    elStatusLabel.textContent   = '';
+    elStatusLabel.className     = 'status-label';
+    elSourceTbody.innerHTML     = '';
+  }
+
+  // 回答表示（textContent で自動 HTML エスケープ）
+  function showAnswer(data) {
+    elStatusLabel.textContent = STATUS_LABELS[data.status] || data.status;
+    elStatusLabel.className   = 'status-label ' + data.status;
+    elAnswerText.textContent  = data.answer;
+    elAnswerArea.classList.add('visible');
+  }
+
+  // 出典FAQ表示（textContent で自動 HTML エスケープ）
+  function showSources(sources) {
+    elSourceTbody.innerHTML = '';
+    for (var i = 0; i < sources.length; i++) {
+      var s  = sources[i];
+      var tr = document.createElement('tr');
+
+      var tdId = document.createElement('td');
+      tdId.textContent = s.faq_id;
+      tr.appendChild(tdId);
+
+      var tdQ = document.createElement('td');
+      tdQ.textContent = s.question;
+      tr.appendChild(tdQ);
+
+      var tdA = document.createElement('td');
+      tdA.textContent = s.answer;
+      tr.appendChild(tdA);
+
+      var tdC   = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className   = 'confidence-badge';
+      badge.textContent = s.confidence.toFixed(2);
+      tdC.appendChild(badge);
+      tr.appendChild(tdC);
+
+      elSourceTbody.appendChild(tr);
+    }
+    elSourceArea.classList.add('visible');
+  }
+
+  // 出典なし
+  function showNoSource() {
+    elNoSourceArea.classList.add('visible');
+  }
+
+  // 通信エラー（画面上部）
+  function showCommError() {
+    elCommErrorMsg.textContent = SERVER_ERROR_MESSAGE;
+    elCommErrorArea.classList.add('visible');
+  }
+
+  // 送信ボタン
+  elSubmitBtn.addEventListener('click', function () {
+    resetAll();
+
+    var q = elQuestion.value.trim();
+
+    // V1: 空入力チェック
+    if (q.length === 0) {
+      elErrorMsg.textContent = '質問を入力してください';
+      elErrorArea.classList.add('visible');
+      return;
+    }
+
+    // V2: 文字数超過チェック
+    if (q.length > MAX_CHARS) {
+      elErrorMsg.textContent = '質問は' + MAX_CHARS + '文字以内で入力してください';
+      elErrorArea.classList.add('visible');
+      return;
+    }
+
+    // 送信開始: empty_state を非表示にし（一度消したら再表示しない）、処理中を表示
+    elEmptyState.classList.add('hidden-state');
+    elSubmitBtn.disabled  = true;
+    elQuestion.disabled   = true;
+    elLoadingArea.classList.add('visible');
+
+    // API 呼び出し
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q })
+    })
+    .then(function (res) {
+      if (!res.ok) {
+        // HTTP 4xx / 5xx → 通信エラーとして画面上部に表示
+        showCommError();
+        return null;
+      }
+      return res.json();
+    })
+    .then(function (data) {
+      if (!data) { return; }
+
+      resetAll();
+
+      showAnswer(data);
+
+      if (data.sources && data.sources.length > 0) {
+        showSources(data.sources);
+      } else {
+        showNoSource();
+      }
+
+      // 質問内容を保持
+      elQuestion.value    = q;
+      elCharCount.textContent = q.length + ' / ' + MAX_CHARS;
+    })
+    .catch(function () {
+      // ネットワークエラー → 画面上部に共通エラー
+      resetAll();
+      showCommError();
+    })
+    .finally(function () {
+      // 送信ボタン再活性
+      elSubmitBtn.disabled = false;
+      elQuestion.disabled  = false;
+    });
+  });
+})();
+</script>
+{% endblock %}

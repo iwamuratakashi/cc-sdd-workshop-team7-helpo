@@ -1,14 +1,15 @@
-# Design Document
+﻿# Design Document
 
 ## Overview
-ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする短い回答、決定的な安全fallback、根拠FAQ表示を提供する。既存のfeature-based FastAPI monolithへ`app/chat` featureとして追加し、`FaqSearchService.search(db, query, top_k=5)`の適合判断を変更せず利用する。
+ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする短い回答、決定的な安全fallback、根拠FAQ表示、および回答への有用性評価を提供する。既存のfeature-based FastAPI monolithへ`app/chat` featureとして追加し、`FaqSearchService.search(db, query, top_k=5)`の適合判断を変更せず利用する。
 
-FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。質問・回答・状態・根拠の永続化と履歴表示はchat-historyが担い、本仕様のスコープ外である。
+FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。質問・回答・状態・根拠の永続化と履歴表示はchat-historyが担い、本仕様のスコープ外である。有用性評価は回答根拠となった出典FAQへ登録し、一回答につき一評価のみを受け付ける。
 
 ### Goals
 - `is_match=true`のFAQだけに根拠を限定し、`AI回答`・`FAQ直接回答`・`該当FAQなし`・`AI利用不可`のいずれかへ必ず収束する。FAQ検索失敗・予期しない処理エラーはFoundation ErrorHandlerへ委譲しHTTP 500とする。
 - timeout時に推論processとCPU負荷を停止させる。
 - offline、CPU-only、no-auto-downloadを採用記録とruntime境界で強制する。
+- 有用性評価（〇/×）を出典FAQ全件に登録し、重複評価を抑止する。
 
 ### Non-Goals
 - FAQ CRUD、Embedding、索引、適合閾値・`is_match`判断の実装または設定化。
@@ -24,6 +25,8 @@ FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分
 - `LocalLlmAdapter`、`LocalLlmWorker`、`ModelAdoptionManifest`検証とworker lifecycle。
 - feature-local `ChatSettings`、router、template。
 - 回答結果の型付きDTO（`ChatAnswerResponse`、`ChatSourceResponse`）。chat-historyはこのDTOを永続化契約の入力として利用する。
+- 有用性評価受付（〇/×）、出典FAQ全件への評価登録、重複評価の抑止、評価状態の返却。
+- 評価用DTO（`FeedbackRequest`、`FeedbackResponse`）および評価エンドポイント。
 
 ### Out of Boundary
 - Foundation所有の`app/config.py`、`app/dependencies.py`、`app/templates/base.html`、`app/main.py`は変更しない。
@@ -36,13 +39,14 @@ FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分
 ### Allowed Dependencies
 - **Foundation**: `Session`/`get_db`、`ErrorHandler`、`WebLayout`、`RouterRegistry`、feature設定拡張点。
 - **Auth**: `CurrentUser(id: int, username: str, role: Literal["user","admin"])`、`require_authenticated_user`。
-- **FAQ**: `FaqSearchService.search(db: Session, query: str, top_k: int = 5) -> FaqSearchResult`、`FaqSearchResult(query,candidates,has_match)`、`FaqCandidate(faq_id,question,answer,confidence,is_match)`。
+- **FAQ**: `FaqSearchService.search(db: Session, query: str, top_k: int = 5) -> FaqSearchResult`、`FaqSearchResult(query,candidates,has_match)`、`FaqCandidate(faq_id,question,answer,confidence,is_match)`。FAQへの有用性評価登録は`FaqFeedbackService.register(db: Session, faq_id: int, helpful: bool) -> None`を利用する。
 - Python 3.10+、FastAPI 0.115+、Pydantic v2、Jinja2、および採用gate通過後のローカルCPU runtime。
 - 依存方向は upstream contracts → chat schemas/settings → grounding/LLM adapter → ChatService → router/UI。上流からchatへのimportは禁止する。
 
 ### Revalidation Triggers
 - 上流型、認証の401/403、FAQ適合意味論、Foundation拡張点の変更。
 - FAQ ID型、FaqSearchService契約の変更。
+- `FaqFeedbackService.register`契約（引数・戻り値・例外）の変更。
 - runtime/model/tokenizer/template/license/artifact、worker停止方式、Windows spawn前提の変更。
 - 同時生成数、要求/応答schemaの変更。
 - chat-historyとの永続化契約の追加または変更。
@@ -97,28 +101,29 @@ helpo/
 │   ├── chat/
 │   │   ├── __init__.py
 │   │   ├── settings.py              # ChatSettings、ModelAdoptionManifest、ManifestValidator
-│   │   ├── schemas.py               # API DTO、status、worker payload/result
+│   │   ├── schemas.py               # API DTO、status、worker payload/result、FeedbackRequest/Response
 │   │   ├── grounding.py             # source選択、prompt data、出力検証
 │   │   ├── llm_worker.py            # spawn子process内runtime境界
 │   │   ├── llm.py                   # adapter、manifest照合、deadline、worker破棄
-│   │   ├── services.py              # ChatService状態遷移
+│   │   ├── services.py              # ChatService状態遷移、FeedbackService評価登録
 │   │   ├── dependencies.py          # feature-local service lifecycle
-│   │   └── router.py                # APIとHTML route、RouterRegistry公開
+│   │   └── router.py                # APIとHTML route、RouterRegistry公開（評価エンドポイント含む）
 │   └── templates/chat/
-│       └── index.html               # chat UIとclient重複抑止
+│       └── index.html               # chat UIとclient重複抑止、評価ボタン・状態管理
 └── tests/
     ├── chat/test_grounding.py
     ├── chat/test_service.py
+    ├── chat/test_feedback.py        # FeedbackService単体テスト（重複抑止・登録委譲）
     ├── chat/test_llm_process.py
-    └── chat/test_api.py
+    └── chat/test_api.py             # 評価エンドポイントのAPIテスト含む
 ```
 
 ### Modified Files
-- `app/chat/*`と`app/templates/chat/*` — feature実装。
-- `tests/chat/*` — acceptance criteriaとWindows採用証跡。
+- `app/chat/*`と`app/templates/chat/*` — feature実装（評価機能含む）。
+- `tests/chat/*` — acceptance criteriaとWindows採用証跡（評価テスト含む）。
 - router/configはFoundationの登録extensionをfeature側から利用する。`config.py`、`dependencies.py`、`base.html`、`main.py`は変更対象ではない。
 - runtime依存のlockfile変更はmanifest承認後の実装taskに限定し、本設計ではruntime名を固定しない。
-- DB table、migration fileは本仕様に含めない（chat-historyが担う）。
+- DB table、migration fileは本仕様に含めない（chat-historyが担う）。評価登録はFAQ側の`FaqFeedbackService`へ委譲し、本仕様にFAQテーブルのmigrationを含めない。
 
 ## System Flows
 
@@ -226,6 +231,36 @@ flowchart TD
 - `no_match`と`ai_unavailable`は利用者へ同じ窓口案内を表示するが、statusでLLM可用性を区別し運用監視に活用する。
 - 入力バリデーションエラー（空入力エラー、文字数超過エラー）は回答処理を行わないため、API statusには含まない。クライアント側即時フィードバックとサーバー側422応答で処理する。
 
+### 有用性評価送信シーケンス
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Router
+    participant FeedbackService
+    participant FaqFeedbackService
+
+    Client->>Router: POST /api/chat/feedback (answer_id, helpful)
+    Router->>FeedbackService: submit_feedback(answer_id, helpful, current_user)
+    alt 既に評価済み
+        FeedbackService-->>Router: AlreadyRatedError
+        Router-->>Client: HTTP 409 (重複評価)
+    else 出典FAQなし（no_match / ai_unavailable）
+        FeedbackService-->>Router: NoSourceFeedbackError
+        Router-->>Client: HTTP 422
+    else 評価受付可能
+        loop 出典FAQ全件
+            FeedbackService->>FaqFeedbackService: register(db, faq_id, helpful)
+        end
+        FeedbackService-->>Router: FeedbackResponse(rated=True, helpful=helpful)
+        Router-->>Client: HTTP 200
+    end
+```
+
+- `answer_id`は`ChatAnswerResponse`が返すセッション内一意の識別子（UUID）を使用する。
+- 評価済み状態はサーバーサイドセッションまたはクライアント側で管理し、送信時に重複チェックを行う。MVPではクライアント側DOMの評価済みフラグで制御し、サーバーはステートレス（重複保護の責務はUIにある）。
+- 評価送信エラー（通信エラー・500）はUIが画面上部に共通エラーメッセージを表示する。
+
 ### worker lifecycle
 
 ```mermaid
@@ -275,6 +310,11 @@ stateDiagram-v2
 | 6.3 | CPU負荷下収束 | Adapter, Worker | Service | worker lifecycle |
 | 6.4 | sensitive log禁止 | ChatService, Adapter | Service | 全flow |
 | 6.5 | 変更時再検証 | ModelAdoptionManifest | State | worker lifecycle |
+| 7.1 | 評価ボタン表示（適合FAQあり） | ChatUI, ChatRouter | API, State | 評価送信sequence |
+| 7.2 | 評価を出典FAQ全件に登録 | FeedbackService, FaqFeedbackService | Service | 評価送信sequence |
+| 7.3 | 一回答一評価・再評価無効化 | FeedbackService, ChatUI | Service, State | 評価送信sequence |
+| 7.4 | 評価ボタン非表示（出典なし） | ChatUI | State | 評価送信sequence |
+| 7.5 | 評価送信中の重複抑止 | ChatUI | State | 評価送信sequence |
 
 ## Components and Interfaces
 
@@ -286,8 +326,9 @@ stateDiagram-v2
 | LocalLlmAdapter | Runtime | deadlineとworker lifecycle | 3.1-3.5, 4.1-4.2, 6.1-6.5 | `run_local_llm_worker` spawn target (Outbound P0), ManifestValidator (Outbound P0) | Service, State |
 | LocalLlmWorker | Process | CPU runtime実行 | 3.1-3.3, 4.2, 6.3 | approved local runtime (External P0) | Service |
 | ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 2.1-2.5, 3.5, 4.1-4.3, 5.3 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0) | Service |
-| ChatRouter | API/Web | auth、HTTP | 1.1-1.6, 5.1-5.3 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
-| ChatUI | Presentation | chat・escaped表示・エラー位置制御 | 1.1-1.6, 4.4-4.5, 5.1-5.3 | `WebLayout` (Outbound P0) | State |
+| ChatRouter | API/Web | auth、HTTP、評価エンドポイント | 1.1-1.6, 5.1-5.3, 7.1-7.5 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), FeedbackService (Outbound P0), ChatUI (Outbound P0) | API |
+| ChatUI | Presentation | chat・escaped表示・エラー位置制御・評価ボタン状態管理 | 1.1-1.6, 4.4-4.5, 5.1-5.3, 7.1, 7.4, 7.5 | `WebLayout` (Outbound P0) | State |
+| FeedbackService | Domain | 評価受付・重複抑止・FAQ全件登録委譲 | 7.2, 7.3, 7.5 | FaqFeedbackService (Outbound P0) | Service |
 
 - **依存方向・重要度の凡例**: `Inbound` = 外部または上流からこのcomponentへcall/dataが入る; `Outbound` = このcomponentが依存先をcallする; `External` = process外のruntime/file/system; `P0` = MVP必須。
 
@@ -488,7 +529,10 @@ class ChatAnswerResponse(BaseModel):
 │ ■ 通信エラー表示エリア（画面上部）    │ ← 通信エラー時のみ表示
 ├──────────────────────────────────┤
 │                                  │
-│ ■ 回答表示エリア                   │ ← 回答と出典を一体表示
+│ ■ 初期表示エリア                   │ ← 質問未送信時のみ表示
+│   「質問してください」旨の文言        │
+│                                  │
+│ ■ 回答表示エリア                   │ ← 回答と出典を一体表示（回答取得後）
 │   回答状態ラベル                    │
 │   回答テキスト                      │
 │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
@@ -516,6 +560,7 @@ class ChatAnswerResponse(BaseModel):
 | 8 | 回答状態ラベル | `status_label` | テキスト | - | 非表示 | 下記の状態ラベル対応表参照 | 回答取得後 |
 | 9 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 回答エリア内に表示。各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
 | 10 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言「出典が見つかりません」のみを回答エリア内に表示する。窓口案内等の追加文言は表示しない | `no_match` / `ai_unavailable` 時 |
+| 11 | 初期表示メッセージ | empty_state | テキスト | - | 表示 | 「質問してください」という旨の文言を表示する。回答エリア・処理中インジケータに代わって表示する | 質問未送信時（画面初期表示・リセット後） |
 
 **状態ラベル対応表**
 

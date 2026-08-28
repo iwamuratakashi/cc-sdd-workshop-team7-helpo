@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 # 下位機能ルーターを共有レジストリへ登録（import 順に登録される）
 import app.auth  # noqa: F401  — AuthRouter を router_registry へ登録
+import app.chat  # noqa: F401  — ChatRouter を router_registry へ登録
 
 
 @asynccontextmanager

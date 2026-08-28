@@ -1,148 +1,145 @@
 # Implementation Plan
 
+## 実装方針（スタブAI回答 ＋ FAQモック）
+
+本タスクではLLM生成の実装を除外し、スタブ方式でAI回答を実現する。
+`is_match=true`の候補が存在する場合、適合上位FAQの登録回答に「（AIによる回答予定）」を
+付加した文字列を、`ai_answer`ステータスのAI回答として返す。
+
+内部のステータス体系・DTO・APIはLLM実装を前提とした設計を維持する。
+
+### FAQ依存の扱い（faq-management-and-search 未実装）
+
+`faq-management-and-search` スペックはまだ実装されていないため、
+FAQテーブル・`FaqSearchService` ともに存在しない。以下の方針を採る。
+
+| 項目 | 方針 |
+|---|---|
+| `FaqCandidate` / `FaqSearchResult` | デザイン定義どおりの型を `app/chat/faq_types.py` に定義し、上流実装に差し替え可能にする |
+| `FaqSearchService` | `app/chat/faq_mock.py` に固定データを返すモック実装を作成し、`ChatService` に注入する |
+| モックデータ | 実際の業務シナリオを想定した数件の固定FAQデータを `app/chat/faq_mock.py` 内に定義する |
+| 上流実装後の差し替え | `ChatService` はインターフェース型にのみ依存するため、モッククラスを本物のクラスに差し替えるだけで完結する |
+
+### 既存インフラ（helpo-foundation）との接点
+
+| 既存リソース | chat feature での利用方法 |
+|---|---|
+| `app/dependencies.py:get_db` | `ChatService.ask` の DB セッション注入に使用（FAQモック使用中はDB参照しないが引数として受け取る） |
+| `app/router_registry.py:RouterRegistry` | chat router 登録に使用（`pages_router` より先に登録） |
+| `app/templates/base.html` | `app/templates/chat/index.html` で `{% extends "base.html" %}` |
+| `app/config.py:Settings` | 変更しない。ChatSettings は `app/chat/settings.py` に独立して作成 |
+| `app/routers/pages.py` | `GET /chat` プレースホルダーを削除し、chat router に置き換える |
+| `main.py` | `registry.register_router(chat_router)` を `pages_router` 登録前に追加する |
+| `app/migrations.py:MigrationRunner` | FAQテーブルなし・DBマイグレーションなし（chat-historyスペックが担う） |
+
+### 除外・延期する要件（LLM実装フェーズで対応）
+
+| 要件ID | 内容 | 延期理由 |
+|--------|------|---------|
+| 3.3 | Windows CPU-only実行 | LLM未実装のため不要 |
+| 3.4 | モデル採用ゲート | LLM未実装のため不要 |
+| 3.5 | 不正生成出力のFAQ直接回答フォールバック | スタブは常に検証済み出力を返すため不要 |
+| 4.1 | LLM利用不能時のFAQ直接回答 | LLM未実装のため不要 |
+| 4.2 | タイムアウト時のFAQ直接回答 | LLM未実装のため不要 |
+| 4.3 | LLM利用不能＋適合なし時のAI利用不可 | LLM未実装のため不要 |
+| 6.3 | CPU負荷下収束 | LLM未実装のため不要 |
+| 6.5 | モデル変更時の再検証 | LLM未実装のため不要 |
+
 ## 実装タスク
 
-- [ ] 1. チャット設定と永続化の基盤を整備する
-- [ ] 1.1 ローカル設定とモデル採用ゲートを検証する
-  - ローカルモデルパス、生成タイムアウト、取消猶予、質問・回答の最大長、プレーンテキストの窓口案内を安全な値として読み込む。
-  - 承認済みmanifest、artifact hash、ライセンス、Windows CPU、offline動作、timeout停止の証跡を検証し、一つでも未確認なら生成を閉じた状態にする。
-  - 検証不合格時もチャット全体を停止させず、LLM利用不能時の直接FAQ回答へ安全にフォールバックできる状態にする。
-  - 完了状態: 正しい設定と採用証跡だけが生成利用可能となり、欠落・不一致・不正値は起動前拒否またはLLM利用不能フォールバックとして観測できる。
-  - _Requirements: 3.2, 3.3, 3.4, 4.1, 4.2, 8.1, 8.2, 8.5_
-  - _Boundary: ChatSettings, ManifestValidator_
-- [ ] 1.2 履歴と根拠スナップショットのマイグレーションを追加する
-  - 一問一答の履歴と回答時点の根拠スナップショットを保存し、所有者・日時の索引と所有者・request IDの一意制約を設ける。
-  - 現在のFAQ参照だけをnullableかつ削除時NULLにし、回答時点のFAQ IDと内容を不変のまま保持する。
-  - 履歴削除時だけ根拠を連鎖削除し、FAQの更新・削除を妨げない参照整合性を成立させる。
-  - 完了状態: マイグレーション適用後に制約と索引を確認でき、FAQ削除後も履歴と不変スナップショットが残る。
-  - _Requirements: 5.4, 6.1, 6.5, 7.1, 7.2, 7.3, 7.4_
-  - _Boundary: ChatMigration_
-- [ ] 1.3 一問一答履歴と本人限定データアクセスを実装する
-  - 一問一答の履歴と複数の根拠スナップショットを一つの処理として原子的に保存する。
-  - 所有者で絞った安定順序の一覧と詳細を取得し、現在のFAQ内容で回答時点の根拠を上書きしない。
-  - 同じ所有者・request IDの再要求では保存済み履歴を再読し、二行目を作らない。
-  - 完了状態: 保存失敗時に履歴と根拠がともに残らず、成功時は本人の一覧・詳細と同一request IDの同じ一件を取得できる。
-  - _Requirements: 1.5, 4.4, 5.4, 6.1, 6.2, 6.3, 6.5, 7.1, 7.2, 7.3_
-  - _Boundary: ChatHistory, ChatSourceSnapshot, ChatHistoryRepository_
-  - _Depends: 1.2_
+- [x] 1. チャット設定とFAQ型・モックを整備する
+- [x] 1.1 ChatSettingsを実装する
+  - `app/chat/settings.py` に `pydantic_settings.BaseSettings` を継承した `ChatSettings` を作成し、`.env` から `CHAT_MAX_QUESTION_CHARS`（正整数）・`CHAT_CONTACT_GUIDANCE`（trim後1〜1000文字、制御文字禁止）・`CHAT_SERVER_ERROR_MESSAGE` を読み込む（`app/config.py` の `Settings` と同じ読み込みパターン）
+  - 不正な値はアプリ起動前に Pydantic バリデーションで拒否し、LLMパス・タイムアウト・manifest設定は保持しない
+  - `app/config.py` は変更しない
+  - 完了状態: 正常な設定値でアプリが起動し、不正値の場合は起動前にバリデーションエラーを観測できる
+  - _Requirements: 6.2_
+  - _Boundary: ChatSettings_
 
-- [ ] 2. FAQ根拠の選択と生成結果の検証を実装する
-- [ ] 2.1 (P) 信頼できるFAQ根拠だけを安定選択する
-  - FAQ検索結果から`is_match=true`の候補だけを選び、confidence降順・FAQ ID昇順で安定させる。
-  - 根拠にはopaqueなsource IDを割り当て、質問とFAQ本文を命令ではなく信頼できないprompt dataとして隔離する。
-  - 会話履歴、未適合FAQ、外部文書、外部知識を生成根拠へ含めない。
-  - 完了状態: 同じ検索結果から常に同じ適合候補順とopaque IDが得られ、未適合候補や履歴・外部知識がprompt dataに現れない。
-  - _Requirements: 2.1, 2.2, 2.3, 2.4, 3.1_
+- [x] 1.2 FAQ型定義とモック検索サービスを実装する
+  - `app/chat/faq_types.py` にデザイン定義どおりの `FaqCandidate(faq_id, question, answer, confidence, is_match)` と `FaqSearchResult(query, candidates, has_match)` をデータクラスまたは Pydantic モデルで定義する（上流実装との差し替えを想定した型契約）
+  - `app/chat/faq_mock.py` に `FaqMockSearchService` クラスを作成し、`search(db, query, top_k) -> FaqSearchResult` メソッドが固定FAQデータから `query` 文字列に部分一致する候補を返すか、一致がなければ `has_match=False` の結果を返すモック実装にする
+  - モックデータは休暇・経費・福利厚生など実際の業務シナリオを想定した5件程度の固定FAQを `app/chat/faq_mock.py` 内に定義する（`is_match=True`・`confidence` 付き）
+  - `ChatService` は `FaqSearchResult` / `FaqCandidate` 型にのみ依存し、`FaqMockSearchService` を直接importしない（依存注入で切り替え可能にする）
+  - 完了状態: `FaqMockSearchService.search` がクエリ文字列に応じて適合ありまたは適合なしの `FaqSearchResult` を返し、型が `faq_types.py` の定義と一致する
+  - _Requirements: 2.1_
+  - _Boundary: FaqTypes, FaqMockSearchService_
+
+- [x] 2. FAQ根拠選択とスタブAI回答を実装する
+- [x] 2.1 信頼できるFAQ根拠だけを安定選択する
+  - `FaqSearchResult` から `has_match=True` かつ `is_match=True` の候補だけを `confidence` 降順・`faq_id` 昇順で安定ソートし選択する
+  - 未適合候補（`is_match=False`）、外部文書、会話履歴が選択結果に含まれないことを保証する
+  - 完了状態: 同じ検索結果から常に同じ適合候補順が得られ、`is_match=False` の候補が選択結果に現れない
+  - _Requirements: 2.1, 2.2, 2.4, 3.1_
   - _Boundary: GroundingPolicy_
-- [ ] 2.2 構造化生成結果を検証し安全な直接回答へ収束させる
-  - 生成結果を構造化形式として解析し、回答の空値・最大長とsource IDの非空・重複・許可集合内条件を検証する。
-  - 検証に失敗した場合は安定順先頭の適合FAQ回答を直接返し、その一件だけを使用根拠とする。
-  - 検証に成功した場合も生成結果が明示した許可済みsource IDの根拠だけを使用済みとして返す。
-  - 完了状態: parse不能、空、長過ぎる回答、未知または不正なsource IDは直接FAQ回答となり、成功時と失敗時の表示根拠が実使用分だけになる。
-  - _Requirements: 3.5, 5.2_
+
+- [x] 2.2 適合上位FAQの回答にスタブ文言を付加し、AI回答として生成する
+  - 適合候補の先頭1件の登録回答文末に「（AIによる回答予定）」を付加したテキストを回答として生成する
+  - 使用した候補1件だけを回答根拠として返し、残りの適合候補を回答根拠に含めない
+  - 完了状態: 適合候補の先頭FAQ回答に文言が付加された文字列と、その1件のみを根拠とした結果が返る
+  - _Requirements: 3.1, 5.2_
   - _Boundary: GroundingPolicy_
-  - _Depends: 1.1, 2.1_
 
-- [ ] 3. Windows向けローカルLLM実行境界を実装する
-- [ ] 3.1 (P) CPU生成を分離workerで安全に実行する
-  - Windowsのspawn子process内でruntimeを構築し、plainでserialize可能な生成payloadだけを受け渡す。
-  - DB Session、FastAPI event loop、native handleをworkerへ持ち込まず、CPUのみで外部通信や自動downloadなしに生成する。
-  - 取消通知に応答でき、必要時に親processから確実に停止・終了待ちできる実行境界にする。
-  - 完了状態: GPU・networkなしのspawn workerがpayloadを処理でき、取消または強制終了後に子processとCPU処理が残留しない。
-  - _Requirements: 3.1, 3.2, 3.3, 4.2, 8.1, 8.3, 8.4_
-  - _Boundary: LocalLlmWorker_
-- [ ] 3.2 採用ゲート付き生成アダプターで期限とworker寿命を管理する
-  - manifest検証を通過した場合だけ生成を受け付け、同時生成数を1に制限する。
-  - queue待機を含む期限を適用し、超過時は取消、猶予待ち、強制終了、終了待ち、結果破棄を順に行う。
-  - 破棄したworkerを再利用せず次回にclean workerを再生成し、未準備と期限超過を型付き失敗として区別する。
-  - 完了状態: 並行要求が直列化され、期限超過workerの遅延結果は返らず、次の要求は再生成workerで処理される。
-  - _Requirements: 3.2, 3.3, 3.4, 4.1, 4.2, 8.1, 8.3, 8.5_
-  - _Boundary: LocalLlmAdapter_
-  - _Depends: 1.1, 3.1_
-
-- [ ] 4. 決定的なチャット回答サービスを統合する
-- [ ] 4.1 FAQ検索から保存までの回答状態遷移を実装する
-  - 上流のFAQ検索サービスを直接利用し、根拠選択、生成、検証、フォールバックを決定的な状態遷移として統合する。
-  - `generated`、`direct_faq`、`no_match`、`search_unavailable`、`llm_unavailable`、`llm_timeout`ごとの回答と根拠規則を適用する。
-  - 最終回答、状態、所有者、日時、実使用根拠を一つの履歴として原子的に保存する。
-  - 完了状態: 検索・適合・生成の各条件が六つの状態のいずれかへ必ず収束し、規則どおりの回答と根拠が一件の履歴になる。
-  - _Requirements: 1.1, 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.5, 4.1, 4.2, 4.3, 4.4, 5.3, 6.1_
+- [x] 3. チャット回答サービスを統合する
+- [x] 3.1 FAQ検索からスタブAI回答・該当FAQなしへの状態遷移を統合する
+  - `ChatService.ask(db: Session, current: CurrentUser, question: str)` が注入された検索サービス（現時点では `FaqMockSearchService`）の `search(db, query, top_k=5)` を呼び出し、適合候補あり→`ai_answer`・適合候補なし→`no_match` のいずれかへ収束させる
+  - FAQ検索失敗・予期しない例外は `ChatStatus` に変換せず、そのまま上位へ伝播させて Foundation の `handle_exception`（`main.py`）に HTTP 500 を委譲する
+  - `app/chat/dependencies.py` に `get_chat_service` FastAPI 依存を定義し、`ChatService` が `get_db`（`app.dependencies`）と `GroundingPolicy` と検索サービスを受け取れるようにする。検索サービスは `FaqMockSearchService` を `get_chat_service` 内で直接インスタンス化して注入する
+  - chatサービスが通常ログに status・duration だけを記録し、質問全文・FAQ全文・回答全文を出さない
+  - `no_match` 時は `sources=[]` とし、回答テキストには `ChatSettings.contact_guidance` を使用する
+  - 完了状態: 適合候補ありの質問では `ai_answer` と根拠1件が、適合候補なしでは `no_match` と空根拠が返り、検索失敗時は例外が伝播して HTTP 500 となる
+  - _Requirements: 1.1, 1.2, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 4.4, 4.5, 5.3, 6.1, 6.4_
   - _Boundary: ChatService_
-  - _Depends: 1.3, 2.2, 3.2_
-- [ ] 4.2 既知障害と冪等競合を型付きで変換する
-  - FAQ検索、LLM未準備、期限超過、生成結果不正の既知失敗を対応する保存済み回答状態へ変換する。
-  - 同一request IDの未解決in-flight競合は再試行可能な競合として返し、二行目を保存しない。
-  - 未知例外とDB障害はrollbackし、内部詳細を含めずfoundationの共通500処理へ委譲する。
-  - 完了状態: 既知失敗は規定状態として保存され、未解決競合は再試行可能となり、未知・DB障害では部分履歴が残らず共通500になる。
-  - _Requirements: 1.5, 4.5_
-  - _Boundary: ChatService, ServiceErrors_
-  - _Depends: 1.3, 4.1_
+  - _Depends: 2.2_
 
-- [ ] 5. 認証済みチャットAPIと本人履歴APIを統合する
-- [ ] 5.1 質問受付APIを認証・入力検証・冪等性へ接続する
-  - 型付き要求で認証を必須にし、質問をtrimして空値と最大長を保存前に拒否する。
-  - 所有者とrequest IDで冪等性を保証し、完了済み重複は同じ結果を200、未解決競合は再試行可能な409で返す。
-  - 回答状態、実使用根拠、回答日時を型付き応答に含め、foundationのrouter登録拡張を通じて公開する。
-  - 完了状態: 認証済みの有効質問だけが処理され、同じUUIDの再送は同じ履歴IDを返し、未認証・入力不正・競合が契約どおり区別される。
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 4.4, 4.5, 5.1_
+- [x] 4. 認証済みチャットAPIとUI画面を実装する
+- [x] 4.1 質問受付APIを認証・入力検証へ接続し、プレースホルダーを置き換える
+  - `ChatQuestionRequest`・`ChatSourceResponse`・`ChatAnswerResponse` の Pydantic v2 DTO と `ChatStatus` 型（`"ai_answer" | "no_match"`）を `app/chat/schemas.py` に定義し、question を trim 後に空値と最大長で 422 拒否する
+  - `require_authenticated_user` を全 route に適用し、HTML 未認証は 303、API 未認証は JSON 401（本文なし）で返す
+  - `app/chat/router.py` の `APIRouter` を作成し、`app/routers/pages.py` の `GET /chat` プレースホルダーを削除した上で、`main.py` の `create_app` 内で `registry.register_router(chat_router)` を `pages_router` より前に追加して chat route が優先されるようにする
+  - `GET /chat`（HTML）と `POST /api/chat`（JSON）を登録し、成功は HTTP 200、FAQ検索失敗・予期しないエラーは HTTP 500 で返す
+  - `Jinja2Templates(directory="app/templates")` を使い、テンプレートを `"chat/index.html"` として参照する
+  - 完了状態: 認証済みの有効質問だけが `ChatService.ask` に渡り、未認証・空入力・文字数超過・FAQ検索失敗が仕様どおりのHTTPステータスと内容で返る
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 4.4, 4.5, 5.1_
   - _Boundary: ChatRouter, ChatSchemas_
-  - _Depends: 4.2_
-- [ ] 5.2 本人だけが利用できる履歴APIを公開する
-  - 一覧を所有者で必ず絞り、安定した新着順と検証済みlimit・offsetで返す。
-  - 詳細では既存の本人所有判定を必ず適用し、管理者にも他人閲覧の例外を設けない。
-  - 共有、export、分析、全利用者横断のrouteを公開しない。
-  - 完了状態: 本人は一覧と保存済み詳細を取得でき、一般利用者・管理者とも他人の詳細を取得できず、範囲外endpointが存在しない。
-  - _Requirements: 5.4, 6.2, 6.3, 6.4, 6.6, 7.2, 7.3, 8.4_
-  - _Boundary: ChatRouter, ChatSchemas_
-  - _Depends: 1.3, 5.1_
 
-- [ ] 6. チャットと履歴の利用画面を実装する
-- [ ] 6.1 安全なチャット画面で質問から回答までを表示する
-  - 共通layoutを利用して質問入力と送信を提供し、送信時に生成したclient UUIDをretryでも保持する。
-  - 処理中は重複操作を抑止し、回答、状態、日時、実使用根拠を安全にescapeして表示する。
-  - 根拠なしの窓口案内を明示し、未認証利用者をloginへ誘導する。
-  - 完了状態: 一画面で処理中から最終回答へ遷移し、retryは同じUUIDを使い、悪意ある本文が実行されず未認証時はloginへ移動する。
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 4.4, 5.1, 5.2, 5.3_
+- [x] 4.2 チャット画面を実装する
+  - `app/templates/chat/index.html` を作成し、`{% extends "base.html" %}` で既存の `app/templates/base.html` を継承する
+  - 質問入力（textarea・文字数カウンター・送信ボタン）と回答エリア（状態ラベル・回答テキスト・出典FAQ一覧）を構成し、全テキストは Jinja2 の autoescape で HTML エスケープして表示する
+  - 送信開始時に送信ボタンを非活性化して重複操作を抑止し、回答受信後に再活性化する
+  - バリデーションエラー（空入力・文字数超過）は入力フォームのすぐ上に表示し、通信エラー（HTTP 500・ネットワークエラー）は画面上部（ヘッダー直下）の共通エラーエリアに内部詳細なしで表示する
+  - `no_match` 時は出典エリアに「出典が見つかりません」のみを表示し、それ以外の文言を出典エリアに追加しない
+  - 完了状態: ブラウザ上で質問を送信し、処理中表示から回答・出典の一体表示へ遷移でき、未認証時はログイン画面へリダイレクトされる
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 4.4, 4.5, 5.1, 5.2, 5.3_
   - _Boundary: ChatUI_
-  - _Depends: 5.1_
-- [ ] 6.2 回答時点の根拠を再現する本人履歴画面を実装する
-  - 本人の履歴一覧と詳細に質問、回答、状態、日時、回答時点の根拠スナップショットを表示する。
-  - 現在のFAQ参照がない根拠は削除済みと表示し、保存済み本文はそのまま提示する。
-  - logout後の再loginやアプリ再起動後も保存済み履歴を同じ内容で表示する。
-  - 完了状態: 本人が過去履歴を一覧・詳細で確認でき、FAQ更新・削除や再起動後も回答時点の内容と削除状態が再現される。
-  - _Requirements: 5.4, 6.2, 6.3, 6.5, 7.2, 7.3_
-  - _Boundary: HistoryUI_
-  - _Depends: 5.2_
-- [ ] 6.3 基盤拡張を通じてチャットと履歴への導線を統合する
-  - foundationの拡張点から認証済み利用者向けのチャット・履歴ナビゲーションを追加し、基盤layout本体を変更しない。
-  - 既存の認証・FAQ画面の導線と表示を維持したまま新画面へ遷移できるようにする。
-  - 完了状態: 共通ナビゲーションからチャットと本人履歴へ移動でき、基盤layout本体と既存画面に差分や回帰がない。
-  - _Requirements: 1.4, 6.2_
-  - _Boundary: ChatUI, WebLayoutIntegration_
-  - _Depends: 6.1, 6.2_
 
-- [ ] 7. 境界・受入条件・Windows CPU動作を検証する
-- [ ] 7.1 根拠・状態・永続化・ログのコンポーネントテストを追加する
-  - 安定した根拠選択、悪意あるprompt data、不正source ID、六つの回答状態と回答・根拠規則を検証する。
-  - owner限定、冪等再読、原子rollback、不変スナップショットをリポジトリ境界で検証する。
-  - アダプターの未準備・失敗・timeoutと、通常ログに質問・回答・FAQ・promptが含まれないことを検証する。
-  - 完了状態: コンポーネントテストが全て合格し、根拠外生成、二重履歴、部分保存、機密本文ログを検出できる。
-  - _Requirements: 2.2, 2.3, 2.4, 2.5, 3.5, 4.1, 4.2, 4.3, 4.4, 5.2, 6.1, 6.2, 6.4, 7.1, 7.2, 7.3, 8.4_
-  - _Boundary: ChatUnitTestSuite_
-  - _Depends: 4.2_
-- [ ] 7.2 実際の上流境界を通す結合・E2Eテストを追加する
-  - foundation、認証、FAQ検索の実際の境界を接続し、APIからUI・履歴詳細までの主要導線を検証する。
-  - 同じUUIDの再送と同時競合、FAQ更新・削除後のsnapshot、再起動後の復元、管理者を含む他人拒否、保存失敗時rollbackを検証する。
-  - 共有、export、分析、横断閲覧など範囲外endpointが追加されていないことを確認する。
-  - 完了状態: 結合・E2Eテストが主要導線と拒否系を実境界で通過し、同一UUIDの履歴は一件だけで範囲外routeが存在しない。
-  - _Requirements: 1.1, 1.2, 1.4, 1.5, 2.1, 2.2, 4.5, 5.1, 5.4, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4_
+- [x] 6. チャット画面に初期表示エリアを追加する
+- [x] 6.1 質問未送信時の初期表示メッセージを実装する
+  - `app/templates/chat/index.html` の回答エリアが非表示の間（質問未送信時・画面初期表示時）、代わりに `empty_state` エリアとして「ご質問をどうぞ」等の文言を表示する
+  - 送信ボタン押下後（送信開始時）に `empty_state` エリアを非表示にし、処理中インジケータを表示する
+  - 回答受信後は `empty_state` エリアを非表示のままにし、回答エリアを表示する（一度質問した後はリセットまで `empty_state` を再表示しない）
+  - 完了状態: 画面初期表示時に `empty_state` の文言が表示され、送信後は非表示になり、回答エリアと同時に表示されることがない
+  - _Requirements: 1.1, 1.2_
+  - _Boundary: ChatUI_
+
+- [x] 5. 境界・受入条件を検証する
+- [x] 5.1 根拠・状態・ログのコンポーネントテストを追加する
+  - `FaqMockSearchService` を直接使用し（外部モック不要）、`GroundingPolicy` と `ChatService` を単体でテストする
+  - `GroundingPolicy` の安定根拠選択・未適合候補排除・スタブ文言付加・使用根拠の絞り込みをユニットテストで確認する
+  - `ChatService.ask` の `ai_answer`/`no_match` ステータスごとに回答と根拠が厳密に一致し、FAQ検索失敗時に例外が `ChatStatus` に変換されず伝播することをテストする
+  - `ChatSettings` のバリデーション境界値（最大文字数・制御文字・空文字列）を fail-closed でテストする
+  - 通常ログに質問全文・FAQ全文・回答全文が含まれないことをテストする
+  - `test_foundation.py` と同じ `DatabaseEngine.reset()` + インメモリ SQLite パターンを使用する
+  - 完了状態: `tests/chat/` 配下の全ユニットテストが合格し、未適合候補の混入・機密本文ログを検出できる
+  - _Requirements: 2.2, 2.3, 2.4, 2.5, 3.1, 5.2, 6.2, 6.4_
+  - _Boundary: ChatTestSuite_
+
+- [x] 5.2 実際の上流境界を通す結合・E2Eテストを追加する
+  - `TestClient(create_app())` を使い（`test_foundation.py` の `test_root_page` と同じパターン）、`POST /api/chat` からレスポンスまでの主要フローを `FaqMockSearchService` 経由で検証する
+  - `ai_answer`（モック適合あり質問）と `no_match`（モック適合なし質問）の各経路を確認する
+  - HTML 303・API 401・422・500 の各エラー経路を確認する
+  - networkをブロックした状態でも回答が返り、外部AIサービスへの通信が発生しないことを確認する
+  - `app/routers/pages.py` の `/chat` プレースホルダーが削除され、chat router が正しく優先されることを確認する
+  - 完了状態: 結合・E2Eテストが主要フローと拒否系を通過し、範囲外route（履歴・共有・export等）が存在しない
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.5, 3.2, 4.4, 4.5, 5.1, 5.3, 6.1_
   - _Boundary: ChatIntegrationTestSuite_
-  - _Depends: 5.2, 6.3, 7.1_
-- [ ] 7.3 Windows CPU・offline環境でモデル採用スモークを実施する
-  - runtimeとモデルを個別に採用ゲートへ通し、GPU・外部通信なしで成功、モデルなし、timeout、検索失敗の各経路を実行する。
-  - timeout後のCPU process収束、worker再生成後の回復、通常ログの安全性を確認する。
-  - ライセンス、artifact hash、Windows CPU、offline、timeout停止の検証結果をmanifest証跡として確認する。
-  - 完了状態: 対象Windows環境で全経路が規定回答へ収束し、子processが残留せず、採用証跡が揃った構成だけ生成可能になる。
-  - _Requirements: 3.2, 3.3, 3.4, 4.1, 4.2, 4.3, 8.1, 8.2, 8.3, 8.4, 8.5_
-  - _Boundary: ChatWindowsAdoptionTest_
-  - _Depends: 7.1, 7.2_
