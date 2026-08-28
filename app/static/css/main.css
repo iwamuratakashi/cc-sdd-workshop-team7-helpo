@@ -43,6 +43,91 @@ header nav a {
   text-decoration: none;
 }
 
+/* ===== Header Navigation Menu ===== */
+.hnm-inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.hnm-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #fff;
+  cursor: default;
+  user-select: none;
+}
+
+.hnm-links {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.hnm-link {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hnm-link:hover {
+  text-decoration: underline;
+}
+
+.hnm-link-inactive {
+  color: #508ce6;
+  cursor: default;
+}
+
+.hnm-link-inactive:hover {
+  text-decoration: none;
+}
+
+.hnm-account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.hnm-user {
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.hnm-login {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 14px;
+  text-decoration: none;
+}
+
+.hnm-login:hover {
+  background: #e5e7eb;
+}
+
+.hnm-logout {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2563eb;
+  background: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.hnm-logout:hover {
+  background: #e5e7eb;
+}
+
 main {
   flex: 1;
 }
