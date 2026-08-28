@@ -4,7 +4,7 @@
 HELPOの社員利用者とFAQ管理者は、現在は本人を識別する仕組みがなく、後続機能が安全な利用者識別子や基本ロールを利用できない。本仕様「local-user-authentication」は、ローカル登録済み利用者がユーザー名とパスワードでログイン・ログアウトできるようにし、認証済みユーザーIDと一般利用者・管理者の基本ロールを後続機能へ提供する。
 
 ## Boundary Context
-- **In scope**: ローカル利用者の資格情報、ログイン・ログアウト、認証セッション、現在の利用者情報、一般利用者・管理者の基本ロール、後続機能が利用する`require_authenticated_user`・`require_admin`・`require_owner`の判定境界、およびブラウザ単位の連続ログイン失敗に対する試行制限（ロック）。
+- **In scope**: ローカル利用者の資格情報、ログイン・ログアウト、認証セッション、現在の利用者情報、一般利用者・管理者の基本ロール、後続機能が利用する`require_authenticated_user`・`require_admin`・`require_owner`の判定境界、ブラウザ単位の連続ログイン失敗に対する試行制限（ロック）、および研修用の初期利用者（`user01`・`admin01`）の事前登録。
 - **Out of scope**: 利用分析・監査、社員SSO、外部IDプロバイダー、多要素認証、部署・役職別権限、権限の任意編集、管理者による全社員履歴閲覧。
 - **Adjacent expectations**: helpo-foundationの設定、永続化、共通エラー処理、ログ、および基本画面構成を利用する。本仕様は`require_admin`・`require_owner`を提供するが、FAQ操作への認可適用はfaq-management-and-searchが所有し、履歴の永続化・表示・本人所有強制はai-helpdesk-chatが所有する。
 
@@ -84,3 +84,12 @@ HELPOの社員利用者とFAQ管理者は、現在は本人を識別する仕組
 4. When ロック中のブラウザからログインが試行されたとき, the HELPO認証機能 shall 利用者の存在有無やロック解除時刻などロック理由を特定できる情報を含めない。
 5. When ロック対象のブラウザでログインが成功したとき, the HELPO認証機能 shall 連続失敗回数を0にリセットする。
 6. When ロック期間が経過したとき, the HELPO認証機能 shall 当該ブラウザからのログイン試行を再度受け付ける。
+
+### Requirement 9: 研修用初期利用者の事前登録
+**Objective:** 研修参加者として、環境構築後すぐに一般利用者と管理者それぞれの立場でログインを試したい。これにより、追加の利用者登録作業なしに研修・動作確認を開始できる。
+
+#### Acceptance Criteria
+1. The HELPO認証機能 shall ユーザー名`user01`、パスワード`password`、基本ロール`user`（一般利用者）のローカル利用者をあらかじめ利用可能な状態にする。
+2. The HELPO認証機能 shall ユーザー名`admin01`、パスワード`password`、基本ロール`admin`（管理者）のローカル利用者をあらかじめ利用可能な状態にする。
+3. Where `user01`または`admin01`という利用者名が既に登録されている場合, the HELPO認証機能 shall 既存の利用者情報を変更せず処理を継続する。
+4. The HELPO認証機能 shall `user01`・`admin01`に対してもRequirement 1のパスワード非平文保持の制約を適用する。
