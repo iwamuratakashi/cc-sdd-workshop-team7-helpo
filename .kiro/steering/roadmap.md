@@ -11,7 +11,7 @@ PythonとFastAPIを中心とした一体型構成を採用し、WindowsのGPUな
 - **Rejected alternatives**: FAQ検索特化型は軽量だが生成AI連携の希望を満たさない。ローカル文書RAG型は文書取込・分割・引用・更新管理が必要となり、研修用MVPには過大である。
 
 ## Scope
-- **In**: FastAPIとSQLiteによるアプリ基盤、ローカルユーザー認証、管理者と一般利用者の基本ロール、FAQ管理、ローカルEmbeddingによる類似検索、FAQを根拠とするローカルLLM回答、社員向けチャットUI、根拠FAQ表示、回答不能時の窓口案内、本人の質問・回答履歴。
+- **In**: FastAPIとSQLiteによるアプリ基盤、ローカルユーザー認証、管理者と一般利用者の基本ロール、FAQ管理、ローカルEmbeddingによる類似検索、FAQを根拠とするローカルLLM回答、社員向けチャットUI、根拠FAQ表示、回答不能時の窓口案内、本人の質問・回答履歴の永続化と表示。
 - **Out**: 一般文書RAG、利用分析とダッシュボード、管理者による全社員の履歴閲覧、履歴の共有・CSV出力、社員SSO、部署別・役職別の高度な権限制御、大人数の同時利用、分散構成。
 
 ## Constraints
@@ -23,11 +23,12 @@ PythonとFastAPIを中心とした一体型構成を採用し、WindowsのGPUな
 - 使用するLLMおよびEmbeddingモデルのライセンスは、具体的なモデル選定時に確認すること。
 
 ## Boundary Strategy
-- **Why this split**: アプリ基盤、本人確認、FAQ知識基盤、AI利用体験を独立させることで、各段階を個別に要件定義・検証できる。AIチャット完成前にも認証とFAQ検索を動作確認でき、LLM固有の問題を他領域から分離できる。
-- **Shared seams to watch**: 認証が提供するユーザーIDとロール、FAQ検索APIと適合判定、AIチャットが保存する履歴と根拠FAQの参照整合性、管理操作と本人履歴に対する認可。
+- **Why this split**: アプリ基盤、本人確認、FAQ知識基盤、AI利用体験、質問・回答履歴を独立させることで、各段階を個別に要件定義・検証できる。AIチャット完成前にも認証とFAQ検索を動作確認でき、LLM固有の問題を他領域から分離できる。チャット回答と履歴永続化を分離することで、回答生成ロジックと履歴管理を独立して進化させられる。
+- **Shared seams to watch**: 認証が提供するユーザーIDとロール、FAQ検索APIと適合判定、AIチャットが返す回答結果と根拠FAQ、チャット履歴が保存する根拠FAQスナップショットの参照整合性、管理操作と本人履歴に対する認可。
 
 ## Specs (dependency order)
 - [x] helpo-foundation -- FastAPI、SQLite、設定、共通データモデル、基本画面構成からなるアプリケーション基盤。Dependencies: none
 - [x] local-user-authentication -- ローカルユーザーのログインと管理者・一般利用者ロールを提供する。Dependencies: helpo-foundation
 - [x] faq-management-and-search -- FAQ管理、Embedding生成、類似検索、適合判定を提供する。Dependencies: helpo-foundation, local-user-authentication
-- [x] ai-helpdesk-chat -- FAQを根拠にしたAIチャット、根拠表示、回答不能時の案内、本人の質問・回答履歴を提供する。Dependencies: helpo-foundation, local-user-authentication, faq-management-and-search
+- [x] ai-helpdesk-chat -- FAQを根拠にしたAIチャット、根拠表示、回答不能時の案内を提供する。Dependencies: helpo-foundation, local-user-authentication, faq-management-and-search
+- [x] chat-history -- 質問・回答履歴の永続化、本人所有の履歴一覧・詳細表示、根拠FAQスナップショットの保存と再現を提供する。Dependencies: helpo-foundation, local-user-authentication, ai-helpdesk-chat, faq-management-and-search

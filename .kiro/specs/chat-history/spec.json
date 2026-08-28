@@ -1,7 +1,7 @@
 {
-  "feature_name": "ai-helpdesk-chat",
-  "created_at": "2026-08-27T00:00:00+09:00",
-  "updated_at": "2026-08-28T17:00:00+09:00",
+  "feature_name": "chat-history",
+  "created_at": "2026-08-28T16:00:00+09:00",
+  "updated_at": "2026-08-28T17:30:00+09:00",
   "language": "ja",
   "phase": "design-generated",
   "approvals": {
