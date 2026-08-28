@@ -6,14 +6,14 @@ ai-helpdesk-chatは、認証済み社員に、登録FAQだけを根拠とする�
 FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分離processで実行する。runtime/modelは採用ゲートまで未指定であり、承認済み`ModelAdoptionManifest`とローカルartifact hashが一致した場合だけ有効になる。質問とFAQはuntrusted prompt dataとして扱い、構造化source ID検証に失敗した生成文は表示しない。質問・回答・状態・根拠の永続化と履歴表示はchat-historyが担い、本仕様のスコープ外である。
 
 ### Goals
-- `is_match=true`のFAQだけに根拠を限定し、`AI回答`・`FAQ直接回答`・`該当FAQなし`・`AI利用不可`・`サーバエラー`のいずれかへ必ず収束する。
+- `is_match=true`のFAQだけに根拠を限定し、`AI回答`・`FAQ直接回答`・`該当FAQなし`・`AI利用不可`のいずれかへ必ず収束する。FAQ検索失敗・予期しない処理エラーはFoundation ErrorHandlerへ委譲しHTTP 500とする。
 - timeout時に推論processとCPU負荷を停止させる。
 - offline、CPU-only、no-auto-downloadを採用記録とruntime境界で強制する。
 
 ### Non-Goals
 - FAQ CRUD、Embedding、索引、適合閾値・`is_match`判断の実装または設定化。
 - 認証、session、role、管理者横断履歴の実装。
-- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示（chat-historyが担う）。
+- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示、チャット画面から履歴画面へのナビゲーション（chat-historyが担う）。
 - 会話履歴を使う生成、tools、外部知識、外部AI、streaming、非同期job、多言語subsystem。
 - runtime/modelの現時点での選定、model取得、repo ID/URL/network clientの提供。
 
@@ -30,7 +30,7 @@ FAQ検索はWeb process内で実行し、CPU生成だけはWindows `spawn`の分
 - Foundationの`Session`、`ErrorHandler`、`WebLayout`、`RouterRegistry`を再実装しない。
 - Authの`CurrentUser`、`require_authenticated_user`を変更しない。
 - FAQのdata、検索、固定relevance decision、`confidence`、`is_match`を再計算しない。
-- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示はchat-historyが担い、本仕様にDB table、migration、repositoryを含めない。
+- 質問・回答・状態・根拠の永続化、履歴一覧・詳細の表示、チャット画面から履歴画面へのナビゲーションはchat-historyが担い、本仕様にDB table、migration、repository、履歴画面リンクを含めない。
 - requirements.md、tasks.md、roadmap、上流specを変更しない。
 
 ### Allowed Dependencies
@@ -137,7 +137,8 @@ sequenceDiagram
     Service->>Search: search top k five
     Search-->>Service: typed result
     alt search failed
-        Service-->>Router: server error response
+        Service-->>Router: exception propagates
+        Router-->>Client: HTTP 500
     else no match and LLM ready
         Service-->>Router: no match response
     else no match and LLM not ready
@@ -174,11 +175,11 @@ sequenceDiagram
 
 | 条件 | 回答状態 | ふるまい | 表示内容 |
 |------|---------|---------|---------|
-| 質問内容がFAQに存在しない＋LLM利用可能 | `no_match`（該当FAQなし） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
-| 質問内容がFAQに存在しない＋LLM利用不可 | `ai_unavailable`（AI利用不可） | LLM生成を行わず窓口案内を返す | 「出典が見つかりません」＋人事・総務窓口案内 |
-| FAQ検索機能が利用不能・予期しないエラー | `server_error`（サーバエラー） | 共通エラーメッセージを返す | サーバエラーメッセージ（内部詳細なし） |
-| 0文字（空または空白のみ）の入力 | （クライアント側）空入力エラー | 処理なしで入力エラーを返す | 「質問を入力してください」、入力内容を保持 |
-| 401文字以上の入力 | （クライアント側）文字数超過エラー | 処理なしで入力エラーを返す | 「質問は400文字以内で入力してください」、入力内容を保持 |
+| 質問内容がFAQに存在しない＋LLM利用可能 | `no_match`（該当FAQなし） | LLM生成を行わず窓口案内を返す | 回答テキストに窓口案内、出典エリアに「出典が見つかりません」のみ |
+| 質問内容がFAQに存在しない＋LLM利用不可 | `ai_unavailable`（AI利用不可） | LLM生成を行わず窓口案内を返す | 回答テキストに窓口案内、出典エリアに「出典が見つかりません」のみ |
+| FAQ検索機能が利用不能・予期しないエラー | （HTTP 500/通信エラー） | Foundation ErrorHandlerへ委譲しHTTP 500を返す | 画面上部（ヘッダー直下）に共通エラーメッセージ（内部詳細なし）。回答エリアは表示しない |
+| 0文字（空または空白のみ）の入力 | （クライアント側）空入力エラー | 処理なしで入力エラーを返す | 入力フォームのすぐ上に「質問を入力してください」、入力内容を保持 |
+| 401文字以上の入力 | （クライアント側）文字数超過エラー | 処理なしで入力エラーを返す | 入力フォームのすぐ上に「質問は400文字以内で入力してください」、入力内容を保持 |
 | 未認証アクセス（チャット画面） | - | 認証ページへ303リダイレクト | エラーメッセージなし（リダイレクト） |
 | 未認証アクセス（API） | - | JSON 401を返す | 本文なし |
 
@@ -197,7 +198,7 @@ flowchart TD
     Received --> Validate
     Validate --> InputError
     Validate --> Search
-    Search --> ServerError
+    Search -->|exception| ErrorHandler[Foundation ErrorHandler HTTP 500]
     Search --> NoMatch
     Search --> Matched
     NoMatch --> LlmReadyCheck
@@ -219,8 +220,8 @@ flowchart TD
 | `direct_faq` | 成功 | LLM利用不能、timeout、または生成結果が空・不正・too long・parse不能・未知IDであり適合候補が存在 | 直接fallback候補の登録`answer` | fallback候補1件 |
 | `no_match` | 成功 | `has_match=false`または適合候補0であり、LLMが利用可能 | 検証済み窓口案内 | 0件 |
 | `ai_unavailable` | エラー | LLMが利用不能（manifest不一致、未設定、load失敗、停止）であり適合候補も存在しない | 検証済み窓口案内 | 0件 |
-| `server_error` | エラー | FAQ検索の既知利用不能・失敗、または予期しない処理エラー | 共通エラーメッセージ | 0件 |
 
+- FAQ検索の既知利用不能・失敗、および予期しない処理エラーは`ChatStatus`に含めない。例外をFoundation ErrorHandlerへ委譲しHTTP 500とする。UIは通信エラーとして画面上部（ヘッダー直下）に共通エラーメッセージを表示する。
 - fallback候補は常に`confidence DESC, faq_id ASC`先頭の`is_match=true`候補である。検索成功後に適合候補があるため、LLM障害時に窓口案内へ分岐せず`direct_faq`へ収束する。
 - `no_match`と`ai_unavailable`は利用者へ同じ窓口案内を表示するが、statusでLLM可用性を区別し運用監視に活用する。
 - 入力バリデーションエラー（空入力エラー、文字数超過エラー）は回答処理を行わないため、API statusには含まない。クライアント側即時フィードバックとサーバー側422応答で処理する。
@@ -255,7 +256,7 @@ stateDiagram-v2
 | 2.2 | 適合候補限定 | GroundingPolicy | Service | 状態flow |
 | 2.3 | 適合なしは該当FAQなし | ChatService | Service | 状態flow |
 | 2.4 | 履歴・外部知識等を不使用 | GroundingPolicy, Worker | Service | worker境界 |
-| 2.5 | 検索失敗のサーバエラー案内 | ChatService | Service | 状態flow |
+| 2.5 | 検索失敗→Foundation ErrorHandler委譲 | ChatService, Foundation ErrorHandler | Service | 生成sequence |
 | 3.1 | 根拠限定短文AI回答生成 | GroundingPolicy, Adapter | Service | 生成sequence |
 | 3.2 | 外部送信禁止 | Adapter, ManifestValidator | Service | worker境界 |
 | 3.3 | Windows CPU-only | Worker, ManifestValidator | Service | worker lifecycle |
@@ -264,11 +265,11 @@ stateDiagram-v2
 | 4.1 | LLM不能→FAQ直接回答 | Adapter, ChatService | Service | 状態flow |
 | 4.2 | timeout→FAQ直接回答 | Adapter, Worker | Service | worker lifecycle |
 | 4.3 | LLM不能＋適合なし→AI利用不可 | ChatService | Service | 状態flow |
-| 4.4 | 検索不能・予期しないエラー→サーバエラー | ChatService, ErrorHandler | Service | 状態flow |
-| 4.5 | 7種の回答状態パターン定義 | ChatStatus, ChatUI | API, State | 状態flow |
+| 4.4 | 検索不能・予期しないエラー→Foundation ErrorHandler委譲→画面上部に通信エラー | Foundation ErrorHandler, ChatUI | Service | 生成sequence |
+| 4.5 | 回答状態パターン定義（API 4種＋クライアント2種＋通信エラー1種） | ChatStatus, ChatUI | API, State | 状態flow |
 | 5.1 | 根拠全項目表示 | ChatSourceResponse, ChatUI | API | 画面仕様 |
 | 5.2 | 実使用FAQだけ表示 | GroundingPolicy | State | 生成sequence |
-| 5.3 | 窓口案内は根拠なし | ChatAnswerResponse, ChatUI | API | 状態flow |
+| 5.3 | 窓口案内時は出典エリアに「出典が見つかりません」のみ | ChatAnswerResponse, ChatUI | API | 状態flow |
 | 6.1 | network/GPU不要 | Adapter, ManifestValidator | Service | worker境界 |
 | 6.2 | local設定検証 | ChatSettings | State | startup |
 | 6.3 | CPU負荷下収束 | Adapter, Worker | Service | worker lifecycle |
@@ -284,9 +285,9 @@ stateDiagram-v2
 | GroundingPolicy | Domain | source選択と出力検証 | 2.2-2.4, 3.1, 3.5, 5.2 | FaqCandidate DTO (Inbound P0) | Service |
 | LocalLlmAdapter | Runtime | deadlineとworker lifecycle | 3.1-3.5, 4.1-4.2, 6.1-6.5 | `run_local_llm_worker` spawn target (Outbound P0), ManifestValidator (Outbound P0) | Service, State |
 | LocalLlmWorker | Process | CPU runtime実行 | 3.1-3.3, 4.2, 6.3 | approved local runtime (External P0) | Service |
-| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 2.1-2.5, 3.5, 4.1-4.5, 5.3 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0) | Service |
+| ChatService | Domain | deterministic状態遷移 | 1.1, 1.2, 2.1-2.5, 3.5, 4.1-4.3, 5.3 | FaqSearchService (Outbound P0), GroundingPolicy (Outbound P0), LocalLlmAdapter (Outbound P0) | Service |
 | ChatRouter | API/Web | auth、HTTP | 1.1-1.6, 5.1-5.3 | HTTP requests (Inbound P0), Auth (Outbound P0), ChatService (Outbound P0), ChatUI (Outbound P0) | API |
-| ChatUI | Presentation | chat・escaped表示 | 1.1-1.6, 4.5, 5.1-5.3 | `WebLayout` (Outbound P0) | State |
+| ChatUI | Presentation | chat・escaped表示・エラー位置制御 | 1.1-1.6, 4.4-4.5, 5.1-5.3 | `WebLayout` (Outbound P0) | State |
 
 - **依存方向・重要度の凡例**: `Inbound` = 外部または上流からこのcomponentへcall/dataが入る; `Outbound` = このcomponentが依存先をcallする; `External` = process外のruntime/file/system; `P0` = MVP必須。
 
@@ -390,9 +391,6 @@ def run_local_llm_worker(request: GenerationRequest) -> str:
 #### Service Contract Errors
 
 ```python
-class FaqSearchUnavailable(Exception):
-    """FaqSearchServiceが既知の利用不能失敗を返した場合にChatServiceが送出する。"""
-
 class ManifestValidationError(Exception):
     """manifestまたはartifactが承認済みlocal設定と一致しない場合にManifestValidatorが送出する。"""
 
@@ -410,14 +408,12 @@ class InvalidGeneratedOutput(Exception):
   - `GroundingPolicy.validate`: strict parse失敗、空または長過ぎる回答、token/char上限違反、空/重複source ID、allowed集合外のsource ID → `InvalidGeneratedOutput`。
   - `ManifestValidator.validate`: path/hash欠落、manifest期待hash不一致、parse失敗、未承認、artifact不一致、証跡不足 → `ManifestValidationError`。
   - `LocalLlmAdapter.generate`: `ManifestValidationError`、load失敗、worker停止 → `LlmUnavailable`; queue待機を含むwall-clock deadline超過 → `LlmTimeout`。
-  - `ChatService.ask`: 既知のFAQ検索失敗 → `FaqSearchUnavailable`。
 - `ChatService.ask`変換規則:
-  - `FaqSearchUnavailable` → `server_error`。
   - `LlmUnavailable`（適合候補あり） → `direct_faq`。
   - `LlmUnavailable`（適合候補なし） → `ai_unavailable`。
   - `LlmTimeout` → `direct_faq`（適合候補が存在するため常にFAQ直接回答へ収束）。
   - `InvalidGeneratedOutput` → `direct_faq`。
-  - 未知例外はFoundation `ErrorHandler`へ委譲しgeneric 500とする。
+  - FAQ検索の失敗および予期しない処理エラーはChatStatus変換を行わず、Foundation `ErrorHandler`へ委譲しHTTP 500とする。
 
 ### Domain Service
 
@@ -425,7 +421,7 @@ class InvalidGeneratedOutput(Exception):
 
 ```python
 ChatStatus = Literal[
-    "ai_answer", "direct_faq", "no_match", "ai_unavailable", "server_error"
+    "ai_answer", "direct_faq", "no_match", "ai_unavailable"
 ]
 
 class ChatService:
@@ -436,7 +432,7 @@ class ChatService:
 
 - `FaqSearchService`、`GroundingPolicy`、`LocalLlmAdapter`を直接注入する。検索は常に`top_k=5`で、configurable FAQ thresholdを参照しない。
 - `db`はFAQ検索のために受け取る。本仕様ではDB書き込みを行わない。
-- 既知障害は`FaqSearchUnavailable`→`server_error`、`LlmUnavailable`（適合候補あり）→`direct_faq`、`LlmUnavailable`（適合候補なし）→`ai_unavailable`、`LlmTimeout`→`direct_faq`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換する。未知例外は再送出しFoundation 500へ委譲する。
+- `LlmUnavailable`（適合候補あり）→`direct_faq`、`LlmUnavailable`（適合候補なし）→`ai_unavailable`、`LlmTimeout`→`direct_faq`、`InvalidGeneratedOutput`→`direct_faq`の型付き例外として捕捉し、対応する`ChatStatus`に変換する。FAQ検索の失敗および未知例外はChatStatusに変換せず、Foundation `ErrorHandler`へ委譲しHTTP 500とする。
 - logはstatus、duration、worker lifecycle eventだけ。質問・回答・FAQ・prompt・pathを出さない。
 
 ### API and Presentation
@@ -462,7 +458,7 @@ class ChatAnswerResponse(BaseModel):
 ```
 
 - `question`はtrim後1..`max_question_chars`。datetimeはUTC ISO 8601 JSON、confidenceは0..1。
-- `sources=[]`は窓口案内またはエラーを表す。
+- `sources=[]`は窓口案内を表す。
 - `ChatAnswerResponse`はchat-historyが永続化契約の入力として利用する型である。
 
 #### ChatRouter
@@ -470,7 +466,7 @@ class ChatAnswerResponse(BaseModel):
 | Method | Endpoint | Request | Response | Errors | Notes |
 |--------|----------|---------|----------|--------|-------|
 | GET | `/chat` | - | HTML | unauthenticated 303 login, 500 | - |
-| POST | `/api/chat` | `ChatQuestionRequest` | `ChatAnswerResponse` 200 | 401, 422, 500 | 全5 statusはHTTP 200で返す |
+| POST | `/api/chat` | `ChatQuestionRequest` | `ChatAnswerResponse` 200 | 401, 422, 500 | 全4 statusはHTTP 200で返す。FAQ検索失敗・予期しないエラーはHTTP 500 |
 
 - 全routeに`require_authenticated_user`を適用する。HTML未認証はloginへ303、API未認証はJSON 401で本文を返さない。
 - 全textはHTML escapeする。
@@ -489,19 +485,20 @@ class ChatAnswerResponse(BaseModel):
 ┌──────────────────────────────────┐
 │ ヘッダー（共通レイアウト）           │
 ├──────────────────────────────────┤
+│ ■ 通信エラー表示エリア（画面上部）    │ ← 通信エラー時のみ表示
+├──────────────────────────────────┤
 │                                  │
 │ ■ 回答表示エリア                   │ ← 回答と出典を一体表示
 │   回答状態ラベル                    │
 │   回答テキスト                      │
 │   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │
-│   出典FAQ一覧                      │ ← 回答エリア内に出典を表示
-│   FAQ ID / 質問文 / 回答文 / 類似度  │
+│   出典エリア                        │ ← 出典FAQ一覧 or「出典が見つかりません」のみ
 │                                  │
 ├──────────────────────────────────┤ ← 画面下部に固定表示
 │ ■ 質問入力エリア（画面下部固定）      │
+│ バリデーションエラーメッセージ         │ ← フォームのすぐ上に表示
 │ [テキストエリア        ] [送信]     │ ← ボタンは入力欄の右に配置
 │ (0/400)                           │
-│ エラーメッセージ                     │ ← フォームのすぐ下に表示
 └──────────────────────────────────┘
 ```
 
@@ -513,12 +510,12 @@ class ChatAnswerResponse(BaseModel):
 | 2 | 文字数カウンター | `char_count` | テキスト | - | `0 / 400` | `{現在文字数} / 400` | 常時表示 |
 | 3 | 送信ボタン | `submit_btn` | button | - | 活性状態 | ラベル: 「送信」。質問入力欄の右に配置する | 常時表示 |
 | 4 | 処理中インジケータ | `loading` | テキスト | - | 非表示 | 「処理中...」 | 送信後〜回答受信前 |
-| 5 | エラーメッセージ | `error_msg` | テキスト | - | 非表示 | 赤文字等のエラースタイル。質問フォームのすぐ下に表示する | バリデーションエラー時・サーバエラー時 |
-| 6 | 回答テキスト | `answer_text` | テキスト | - | 非表示 | HTMLエスケープ済みテキスト | 回答取得後 |
-| 7 | 回答状態ラベル | `status_label` | テキスト | - | 非表示 | 下記の状態ラベル対応表参照 | 回答取得後 |
-| 8 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 回答エリア内に表示。各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
-| 9 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言。回答エリア内に表示する | `no_match` / `ai_unavailable` / `server_error` 時 |
-| 10 | 窓口案内メッセージ | `guidance` | テキスト | - | 非表示 | `contact_guidance`設定値（HTMLエスケープ済み）。回答エリア内に表示する | `no_match` / `ai_unavailable` 時 |
+| 5 | バリデーションエラーメッセージ | `validation_error_msg` | テキスト | - | 非表示 | 赤文字等のエラースタイル。入力フォームのすぐ上に表示する | バリデーションエラー時（空入力・文字数超過） |
+| 6 | 通信エラーメッセージ | `comm_error_msg` | テキスト | - | 非表示 | 赤文字等のエラースタイル。画面上部（ヘッダー直下）に表示する | 通信エラー時（HTTP 500・ネットワークエラー） |
+| 7 | 回答テキスト | `answer_text` | テキスト | - | 非表示 | HTMLエスケープ済みテキスト | 回答取得後 |
+| 8 | 回答状態ラベル | `status_label` | テキスト | - | 非表示 | 下記の状態ラベル対応表参照 | 回答取得後 |
+| 9 | 出典FAQ一覧 | `sources` | リスト | - | 非表示 | 回答エリア内に表示。各出典につき: FAQ ID、質問文、回答文、類似度 | 出典が1件以上の場合 |
+| 10 | 「出典が見つかりません」 | `no_source_msg` | テキスト | - | 非表示 | 固定文言「出典が見つかりません」のみを回答エリア内に表示する。窓口案内等の追加文言は表示しない | `no_match` / `ai_unavailable` 時 |
 
 **状態ラベル対応表**
 
@@ -528,9 +525,9 @@ class ChatAnswerResponse(BaseModel):
 | `direct_faq` | 成功 | FAQ直接回答 |
 | `no_match` | 成功 | 該当FAQなし |
 | `ai_unavailable` | エラー | AI利用不可 |
-| `server_error` | エラー | サーバエラー |
 | （クライアント側のみ） | エラー | 空入力エラー |
 | （クライアント側のみ） | エラー | 文字数超過エラー |
+| （通信エラー/HTTP 500） | エラー | 通信エラー（画面上部に共通メッセージ表示） |
 
 **アクション・イベント**
 
@@ -540,12 +537,11 @@ class ChatAnswerResponse(BaseModel):
 | A2 | 送信ボタン押下 | `submit_btn` | バリデーション実行。成功なら `POST /api/chat` を送信する |
 | A3 | 送信開始 | `submit_btn`, `loading` | 送信ボタンを非活性にし、処理中インジケータを表示する |
 | A4 | 回答受信（`ai_answer` / `direct_faq`） | `answer_text`, `sources` | 回答エリアに回答テキストと出典FAQ一覧を一体表示する |
-| A5 | 回答受信（`no_match` / `ai_unavailable`） | `no_source_msg`, `guidance` | 回答エリアに「出典が見つかりません」＋窓口案内を表示する。出典一覧は表示しない |
-| A6 | 回答受信（`server_error`） | `error_msg` | 回答エリアにサーバエラーメッセージを表示する。内部詳細は表示しない |
-| A7 | 回答受信後 | `submit_btn`, `loading` | 送信ボタンを再活性にし、処理中を非表示にする |
-| A8 | バリデーションエラー（空入力） | `error_msg`, `question` | 質問フォームのすぐ下に空入力エラーメッセージを表示する。入力内容は保持し修正可能にする |
-| A9 | バリデーションエラー（文字数超過） | `error_msg`, `question` | 質問フォームのすぐ下に文字数超過エラーメッセージを表示する。入力内容は保持し修正可能にする |
-| A10 | 500応答（システムエラー） | `error_msg` | 質問フォームのすぐ下に共通エラーメッセージを表示する（内部詳細は表示しない） |
+| A5 | 回答受信（`no_match` / `ai_unavailable`） | `answer_text`, `no_source_msg` | 回答テキストに窓口案内を表示する。出典エリアに「出典が見つかりません」のみを表示する。出典一覧・窓口案内メッセージは出典エリアに表示しない |
+| A6 | 回答受信後 | `submit_btn`, `loading` | 送信ボタンを再活性にし、処理中を非表示にする |
+| A7 | バリデーションエラー（空入力） | `validation_error_msg`, `question` | 入力フォームのすぐ上に空入力エラーメッセージを表示する。入力内容は保持し修正可能にする |
+| A8 | バリデーションエラー（文字数超過） | `validation_error_msg`, `question` | 入力フォームのすぐ上に文字数超過エラーメッセージを表示する。入力内容は保持し修正可能にする |
+| A9 | 通信エラー（HTTP 500・ネットワークエラー） | `comm_error_msg` | 画面上部（ヘッダー直下）に共通エラーメッセージを表示する（内部詳細は表示しない）。FAQ検索失敗・予期しないサーバエラーもこのパスで処理する |
 
 **バリデーション**
 
@@ -555,17 +551,18 @@ class ChatAnswerResponse(BaseModel):
 | V2 | `question` | 最大400文字（trim後） | 「質問は400文字以内で入力してください」（文字数超過エラー） | 送信ボタン押下時（クライアント側） |
 | V3 | `question` | trim後1〜400文字 | 422エラー | サーバー側（`ChatQuestionRequest`バリデーション） |
 
-- V1〜V2はクライアント側で即時フィードバックし、送信を抑止する。エラーメッセージは質問フォームのすぐ下に表示する。
+- V1〜V2はクライアント側で即時フィードバックし、送信を抑止する。エラーメッセージは入力フォームのすぐ上に表示する。
 - V3はサーバー側でも必ず再検証する（クライアント検証のバイパス対策）。
 - バリデーションエラー時は回答処理を一切行わない。
 
 ## Error Handling
 
 ### Error Strategy
-- 422: question schema不正。回答処理を開始しない。
+- 422: question schema不正。回答処理を開始しない。バリデーションエラーは入力フォームのすぐ上に表示する。
 - 401/303: API/HTML別の上流認証挙動。
-- FAQ既知障害→`server_error`、LLM未準備（適合あり）→`direct_faq`、LLM未準備（適合なし）→`ai_unavailable`、timeout→`direct_faq`、invalid output→`direct_faq`は正常なfallback responseでHTTP 200。
-- 未知例外はFoundation汎用500へ委譲し、内部詳細をresponseへ出さない。
+- LLM未準備（適合あり）→`direct_faq`、LLM未準備（適合なし）→`ai_unavailable`、timeout→`direct_faq`、invalid output→`direct_faq`は正常なfallback responseでHTTP 200。
+- FAQ検索失敗・予期しない処理エラーはFoundation ErrorHandlerへ委譲しHTTP 500とする。UIは画面上部（ヘッダー直下）に共通エラーメッセージを表示する。内部詳細をresponseへ出さない。
+- ネットワークエラーも同じくUIが画面上部に共通エラーメッセージを表示する。
 
 ### Monitoring
 - metricはstatus count、duration、queue wait、timeout、worker terminate/recreate、manifest gate failureを本文なしで記録する。
@@ -577,16 +574,16 @@ class ChatAnswerResponse(BaseModel):
 
 | IDs | Required verification |
 |-----|-----------------------|
-| 1.1-1.6 | 処理中→同画面結果、空入力エラー無処理、文字数超過エラー無処理、HTML 303/API 401、送信中ボタン非活性による重複抑止 |
+| 1.1-1.6 | 処理中→同画面結果、空入力エラー・文字数超過エラーをフォーム上に表示し無処理、HTML 303/API 401、送信中ボタン非活性による重複抑止 |
 | 2.1-2.5 | 正規FAQ DTO、`top_k=5`、`is_match=true`だけ、has-match不整合も安全側、履歴/tools/外部知識なし、検索失敗案内 |
 | 3.1-3.5 | short structured generation、no-network、Windows CPU、未承認artifact拒否、空/parse/too-long/invalid source ID fallback |
-| 4.1-4.5 | load停止/不能→FAQ直接回答、hard timeout→FAQ直接回答、LLM不能＋適合なし→AI利用不可、検索不能→サーバエラー、全5 API status＋2 validation error、未知例外が共通500 |
-| 5.1-5.3 | source全field、実引用のみ、案内sources空 |
+| 4.1-4.5 | load停止/不能→FAQ直接回答、hard timeout→FAQ直接回答、LLM不能＋適合なし→AI利用不可、検索不能→Foundation ErrorHandler→HTTP 500→画面上部に通信エラー表示、全4 API status＋2 client validation error＋1通信エラー |
+| 5.1-5.3 | source全field、実引用のみ、出典なし時は「出典が見つかりません」のみ表示 |
 | 6.1-6.5 | offline/no credential/GPU、全local設定検証、CPU負荷timeout収束、本文nolog、artifact変更時gate再実行 |
 
 ### Unit Tests
 - `GroundingPolicy`: stable tie-break、`is_match=false`除外、質問/FAQ内のmalicious prompt injectionをdata扱い、unknown/duplicate source ID、parse失敗、空、token/char超過を拒否する（2.2-2.4, 3.1, 3.5, 5.2）。
-- `ChatService`: 5 API statusごとにanswer/sourceが厳密に一致し、search/LLM障害時に直接fallback選択を再計算しない（2.3, 2.5, 4.1-4.4）。
+- `ChatService`: 4 API statusごとにanswer/sourceが厳密に一致し、LLM障害時に直接fallback選択を再計算しない。FAQ検索失敗時は例外が伝播しHTTP 500となることを確認する（2.3, 2.5, 4.1-4.4）。
 - `ChatSettings`/manifest: control character、長さ、hash/version/license/evidence/approved不一致をfail-closedにする（3.4, 6.2, 6.5）。
 
 ### Integration Tests
@@ -595,7 +592,7 @@ class ChatAnswerResponse(BaseModel):
 - 設定不正でstartup拒否、設定正常で正常応答を確認する（6.2）。
 
 ### E2E and Windows Adoption Tests
-- login→質問→処理中→escaped回答/source、空入力エラー・文字数超過エラーの修正表示をフォーム下に確認する（1.1-1.6, 5.1-5.3）。
+- login→質問→処理中→escaped回答/source、空入力エラー・文字数超過エラーの修正表示をフォーム上に確認する。通信エラーが画面上部に表示されることを確認する。出典なし時は「出典が見つかりません」のみ表示されることを確認する（1.1-1.6, 5.1-5.3）。
 - malicious FAQ HTML/scriptとprompt命令が実行・解釈されず、invalid generated source IDが直接FAQへ退避する（3.5, 5.2）。
 - GPUなし対象Windows CPUでqueue待機込みtimeoutを発生させ、取消/grace/terminate後にprocess消滅とCPU収束、clean workerで次要求成功を計測する（4.2, 6.3）。
 - 採用候補ごとにoffline起動、memory、load、P50/P95、max token/char、timeout-stop evidenceを取得し、fresh official license/runtime確認結果とともにmanifestへ記録する。承認前は`is_ready=false`を確認する（3.3-3.4, 6.1, 6.5）。

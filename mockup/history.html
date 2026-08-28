@@ -104,68 +104,25 @@
       margin-bottom: 24px;
     }
 
-    /* ===== Section shared ===== */
-    .section {
+    /* ===== History Card ===== */
+    .history-card {
       background: #fff;
       border-radius: 8px;
       padding: 24px;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       border: 1px solid #e5e7eb;
     }
 
-    /* ===== Total Count ===== */
-    .total-count {
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card-datetime {
       font-size: 14px;
       color: #6b7280;
-      margin-bottom: 24px;
-    }
-
-    /* ===== History Table ===== */
-    .history-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 16px;
-      line-height: 1.7;
-    }
-
-    .history-table th {
-      background: #f9fafb;
-      text-align: left;
-      padding: 12px 16px;
-      border-bottom: 2px solid #e5e7eb;
-      font-weight: 600;
-      color: #374151;
-      white-space: nowrap;
-      font-size: 14px;
-    }
-
-    .history-table td {
-      padding: 12px 16px;
-      border-bottom: 1px solid #f3f4f6;
-      vertical-align: top;
-      color: #1a1a1a;
-    }
-
-    .history-table tr:last-child td {
-      border-bottom: none;
-    }
-
-    .history-table tbody tr:hover {
-      background: #f9fafb;
-    }
-
-    .td-datetime {
-      white-space: nowrap;
-      font-size: 14px;
-      color: #6b7280;
-    }
-
-    .td-question,
-    .td-answer {
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
 
     /* ===== Status Label ===== */
@@ -184,82 +141,100 @@
     .status-label.ai_unavailable { background: #fee2e2; color: #991b1b; }
     .status-label.server_error  { background: #fee2e2; color: #991b1b; }
 
-    /* ===== Detail Link ===== */
-    .detail-link {
-      color: #2563eb;
-      text-decoration: none;
+    /* ===== Card Sections ===== */
+    .card-section {
+      margin-bottom: 16px;
+    }
+
+    .card-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .card-section-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #6b7280;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .card-section-text {
+      font-size: 16px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    /* ===== Source FAQ Area ===== */
+    .source-area {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .source-table {
+      width: 100%;
+      border-collapse: collapse;
       font-size: 14px;
-      font-weight: 600;
-      white-space: nowrap;
+      line-height: 1.7;
     }
 
-    .detail-link:hover {
-      text-decoration: underline;
-    }
-
-    /* ===== Pagination ===== */
-    .pagination {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      gap: 24px;
-      margin-top: 24px;
-    }
-
-    .pagination-btn {
-      font-family: inherit;
-      font-size: 14px;
-      font-weight: 600;
-      padding: 8px 20px;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      background: #fff;
-      color: #374151;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-
-    .pagination-btn:hover:not(:disabled) {
-      background: #f3f4f6;
-      border-color: #9ca3af;
-    }
-
-    .pagination-btn:disabled {
+    .source-table th {
       background: #f9fafb;
-      color: #d1d5db;
-      border-color: #e5e7eb;
-      cursor: not-allowed;
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 2px solid #e5e7eb;
+      font-weight: 600;
+      color: #374151;
+      white-space: nowrap;
+      font-size: 13px;
+    }
+
+    .source-table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+      color: #1a1a1a;
+    }
+
+    .source-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .confidence-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #ecfdf5;
+      color: #065f46;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    /* ===== No Source Message ===== */
+    .no-source-msg {
+      font-size: 14px;
+      color: #92400e;
+      font-weight: 600;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #e5e7eb;
     }
 
     /* ===== Empty State ===== */
+    .empty-msg-section {
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+    }
+
     .empty-msg {
       text-align: center;
       padding: 48px 24px;
       color: #6b7280;
       font-size: 16px;
       line-height: 1.7;
-    }
-
-    /* ===== Chat Link ===== */
-    .chat-link-area {
-      text-align: center;
-      margin-top: 24px;
-    }
-
-    .chat-link {
-      display: inline-block;
-      color: #2563eb;
-      text-decoration: none;
-      font-size: 16px;
-      font-weight: 600;
-      padding: 10px 24px;
-      border: 1px solid #2563eb;
-      border-radius: 8px;
-      transition: all 0.15s;
-    }
-
-    .chat-link:hover {
-      background: #eff6ff;
     }
 
     /* ===== Utility ===== */
@@ -279,49 +254,28 @@
 
     <div class="mockup-btn-group">
       <div class="mockup-btn-group-label">履歴件数パターン</div>
-      <button class="mockup-btn" onclick="setState('one')">履歴1件</button>
       <button class="mockup-btn active" onclick="setState('empty')">履歴0件</button>
-      <button class="mockup-btn" onclick="setState('ten')">履歴10件</button>
+      <button class="mockup-btn" onclick="setState('one')">履歴1件（AI回答＋出典あり）</button>
+      <button class="mockup-btn" onclick="setState('multi')">履歴5件（複数パターン）</button>
+    </div>
+
+    <div class="mockup-btn-group">
+      <div class="mockup-btn-group-label">特殊パターン</div>
+      <button class="mockup-btn" onclick="setState('deleted_faq')">FAQ削除済み出典あり</button>
+      <button class="mockup-btn" onclick="setState('no_source')">出典なし（no_match）</button>
     </div>
   </div>
 
   <!-- ===== Main ===== -->
   <main class="main">
-    <h1 class="page-title">質問履歴</h1>
+    <h1 class="page-title" id="page_title">質問履歴</h1>
 
-    <!-- 件数表示 -->
-    <div id="total_count" class="total-count hidden"></div>
-
-    <!-- 履歴リスト -->
-    <div id="history_list" class="section hidden">
-      <table class="history-table">
-        <thead>
-          <tr>
-            <th>日時</th>
-            <th>質問（抜粋）</th>
-            <th>回答（抜粋）</th>
-            <th>状態</th>
-            <th>詳細</th>
-          </tr>
-        </thead>
-        <tbody id="history_tbody"></tbody>
-      </table>
-
-      <!-- Pagination -->
-      <div id="pagination" class="pagination hidden">
-        <button id="prev_btn" class="pagination-btn" disabled>前へ</button>
-        <button id="next_btn" class="pagination-btn" disabled>次へ</button>
-      </div>
-    </div>
+    <!-- 履歴カードリスト -->
+    <div id="history_cards"></div>
 
     <!-- 履歴なしメッセージ -->
-    <div id="empty_msg" class="section hidden">
+    <div id="empty_msg" class="empty-msg-section hidden">
       <div class="empty-msg">質問履歴はありません</div>
-    </div>
-
-    <!-- チャット画面リンク -->
-    <div class="chat-link-area">
-      <a href="/chat" class="chat-link" id="chat_link">チャットへ戻る</a>
     </div>
   </main>
 
@@ -336,7 +290,6 @@
     };
 
     // ===== ダミーデータ生成 =====
-
     function getDummyHistoryList(pattern) {
       switch (pattern) {
         case 'empty':
@@ -348,9 +301,27 @@
               {
                 history_id: 1,
                 question: '有給休暇の申請方法を教えてください',
-                answer: '有給休暇の申請は、社内ポータルの「勤怠管理」メニューから行えます。「休暇申請」ボタンをクリックし、希望日と理由を入力して申請してください。',
+                answer: '有給休暇の申請は、社内ポータルの「勤怠管理」メニューから行えます。「休暇申請」ボタンをクリックし、希望日と理由を入力して申請してください。申請は希望日の3営業日前までに提出が必要です。上長の承認後、申請完了の通知メールが届きます。',
                 status: 'ai_answer',
-                created_at: '2026-08-27T10:30:00Z'
+                created_at: '2026-08-27T10:30:00Z',
+                sources: [
+                  {
+                    faq_id_at_answer: 12,
+                    current_faq_id: 12,
+                    question: '有給休暇はどのように申請しますか？',
+                    answer: '社内ポータルの「勤怠管理」→「休暇申請」から申請できます。希望日の3営業日前までに申請してください。',
+                    confidence: 0.92,
+                    is_deleted: false
+                  },
+                  {
+                    faq_id_at_answer: 15,
+                    current_faq_id: 15,
+                    question: '休暇申請の承認フローを教えてください',
+                    answer: '休暇申請は直属の上長が承認します。承認後、申請者と人事部に通知メールが送信されます。',
+                    confidence: 0.78,
+                    is_deleted: false
+                  }
+                ]
               }
             ],
             limit: 20,
@@ -358,83 +329,122 @@
             total: 1
           };
 
-        case 'ten':
+        case 'multi':
+          return {
+            items: [
+              {
+                history_id: 5,
+                question: '社内Wi-Fiのパスワードを教えてください',
+                answer: '社内Wi-Fiのパスワードは、情報システム部から配布されるセキュリティカードに記載されています。紛失した場合は情報システム部（内線: 3456）へお問い合わせください。',
+                status: 'ai_answer',
+                created_at: '2026-08-28T09:15:00Z',
+                sources: [
+                  {
+                    faq_id_at_answer: 20,
+                    current_faq_id: 20,
+                    question: '社内Wi-Fiの接続方法を教えてください',
+                    answer: 'セキュリティカードに記載のSSIDとパスワードで接続できます。紛失時は情報システム部へ。',
+                    confidence: 0.88,
+                    is_deleted: false
+                  }
+                ]
+              },
+              {
+                history_id: 4,
+                question: '経費精算の締め日はいつですか',
+                answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
+                status: 'direct_faq',
+                created_at: '2026-08-27T11:00:00Z',
+                sources: [
+                  {
+                    faq_id_at_answer: 8,
+                    current_faq_id: 8,
+                    question: '経費精算の締め日と振込日を教えてください',
+                    answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
+                    confidence: 0.95,
+                    is_deleted: false
+                  }
+                ]
+              },
+              {
+                history_id: 3,
+                question: '近くのおすすめのランチスポットを教えて',
+                answer: 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。',
+                status: 'no_match',
+                created_at: '2026-08-27T12:00:00Z',
+                sources: []
+              },
+              {
+                history_id: 2,
+                question: '健康診断の予約方法を教えてください',
+                answer: 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。',
+                status: 'ai_unavailable',
+                created_at: '2026-08-27T14:20:00Z',
+                sources: []
+              },
+              {
+                history_id: 1,
+                question: '出張申請の手順を教えてください',
+                answer: 'システムエラーが発生しました。しばらく時間をおいてから再度お試しください。',
+                status: 'server_error',
+                created_at: '2026-08-27T16:45:00Z',
+                sources: []
+              }
+            ],
+            limit: 20,
+            offset: 0,
+            total: 5
+          };
+
+        case 'deleted_faq':
           return {
             items: [
               {
                 history_id: 10,
-                question: '社内Wi-Fiのパスワードを教えてください',
-                answer: '社内Wi-Fiのパスワードは、情報システム部から配布されるセキュリティカードに記載されています。紛失した場合は情報システム部（内線: 3456）へお問い合わせください。',
+                question: '旧社内規程の変更点を教えてください',
+                answer: '旧社内規程では、出勤時間は9:00〜18:00と定められていました。2026年4月の改定により、フレックスタイム制が導入され、コアタイムは10:00〜15:00に変更されました。',
                 status: 'ai_answer',
-                created_at: '2026-08-28T09:15:00Z'
-              },
-              {
-                history_id: 9,
-                question: '出張申請の手順を教えてください',
-                answer: 'システムエラーが発生しました。しばらく時間をおいてから再度お試しください。',
-                status: 'server_error',
-                created_at: '2026-08-27T16:45:00Z'
-              },
-              {
-                history_id: 8,
-                question: '健康診断の予約方法を教えてください',
-                answer: 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。',
-                status: 'ai_unavailable',
-                created_at: '2026-08-27T14:20:00Z'
-              },
+                created_at: '2026-08-25T14:00:00Z',
+                sources: [
+                  {
+                    faq_id_at_answer: 5,
+                    current_faq_id: null,
+                    question: '勤務時間の規定を教えてください',
+                    answer: '出勤時間は9:00〜18:00です。昼休みは12:00〜13:00です。',
+                    confidence: 0.85,
+                    is_deleted: true
+                  },
+                  {
+                    faq_id_at_answer: 22,
+                    current_faq_id: 22,
+                    question: 'フレックスタイム制のコアタイムは何時ですか？',
+                    answer: 'コアタイムは10:00〜15:00です。フレキシブルタイムは7:00〜10:00、15:00〜22:00です。',
+                    confidence: 0.79,
+                    is_deleted: false
+                  }
+                ]
+              }
+            ],
+            limit: 20,
+            offset: 0,
+            total: 1
+          };
+
+        case 'no_source':
+          return {
+            items: [
               {
                 history_id: 7,
                 question: '近くのおすすめのランチスポットを教えて',
                 answer: 'お探しの情報が見つかりませんでした。人事部（内線: 1234）または総務部（内線: 5678）までお問い合わせください。',
                 status: 'no_match',
-                created_at: '2026-08-27T12:00:00Z'
-              },
-              {
-                history_id: 6,
-                question: '経費精算の締め日はいつですか',
-                answer: '経費精算の締め日は毎月25日です。25日が土日祝日の場合は、直前の営業日が締め日となります。翌月10日に指定口座へ振り込まれます。',
-                status: 'direct_faq',
-                created_at: '2026-08-27T11:00:00Z'
-              },
-              {
-                history_id: 5,
-                question: '有給休暇の申請方法を教えてください',
-                answer: '有給休暇の申請は、社内ポータルの「勤怠管理」メニューから行えます。「休暇申請」ボタンをクリックし、希望日と理由を入力して申請してください。申請は希望日の3営業日前までに提出が必要です。',
-                status: 'ai_answer',
-                created_at: '2026-08-27T10:30:00Z'
-              },
-              {
-                history_id: 4,
-                question: '社内研修の申し込み方法を教えてください',
-                answer: '社内研修は人事ポータルの「研修・教育」メニューから申し込みができます。受講希望の研修を選択し、上長の承認を得てからお申し込みください。',
-                status: 'ai_answer',
-                created_at: '2026-08-26T15:30:00Z'
-              },
-              {
-                history_id: 3,
-                question: '名刺の追加発注はどうすればいいですか',
-                answer: '名刺の追加発注は、総務部の共有フォルダにある「名刺発注申請書」に必要事項を記入し、総務部メールアドレスへ送付してください。通常5営業日で届きます。',
-                status: 'direct_faq',
-                created_at: '2026-08-26T10:15:00Z'
-              },
-              {
-                history_id: 2,
-                question: '会議室の予約方法を教えてください',
-                answer: '会議室の予約はグループウェアの「施設予約」機能から行えます。空き状況を確認し、希望の日時と会議室を選択して予約してください。',
-                status: 'ai_answer',
-                created_at: '2026-08-25T14:00:00Z'
-              },
-              {
-                history_id: 1,
-                question: '社員証を紛失した場合の対応を教えてください',
-                answer: '社員証を紛失した場合は、速やかに総務部（内線: 5678）へ連絡してください。紛失届を提出後、再発行手続きを行います。再発行には1週間程度かかります。',
-                status: 'ai_answer',
-                created_at: '2026-08-25T09:00:00Z'
+                created_at: '2026-08-27T12:00:00Z',
+                sources: []
               }
             ],
             limit: 20,
             offset: 0,
-            total: 10
+            total: 1
           };
 
         default:
@@ -443,12 +453,7 @@
     }
 
     // ===== DOM要素参照 =====
-    var elTotalCount   = document.getElementById('total_count');
-    var elHistoryList  = document.getElementById('history_list');
-    var elHistoryTbody = document.getElementById('history_tbody');
-    var elPagination   = document.getElementById('pagination');
-    var elPrevBtn      = document.getElementById('prev_btn');
-    var elNextBtn      = document.getElementById('next_btn');
+    var elHistoryCards = document.getElementById('history_cards');
     var elEmptyMsg     = document.getElementById('empty_msg');
 
     // ===== HTMLエスケープ =====
@@ -469,77 +474,135 @@
       return yyyy + '/' + mm + '/' + dd + ' ' + hh + ':' + mi;
     }
 
-    // ===== テキスト省略 =====
-    function truncate(str, maxLen) {
-      if (str.length <= maxLen) return str;
-      return str.substring(0, maxLen) + '...';
-    }
-
     // ===== 全エリアリセット =====
     function resetAll() {
-      elTotalCount.classList.add('hidden');
-      elTotalCount.textContent = '';
-      elHistoryList.classList.add('hidden');
-      elHistoryTbody.innerHTML = '';
-      elPagination.classList.add('hidden');
-      elPrevBtn.disabled = true;
-      elNextBtn.disabled = true;
+      elHistoryCards.innerHTML = '';
       elEmptyMsg.classList.add('hidden');
     }
 
-    // ===== 件数表示テキスト生成 =====
-    function buildTotalCountText(total, offset, displayCount) {
-      var from = offset + 1;
-      var to = offset + displayCount;
-      return '全' + total + '件中 ' + from + '〜' + to + '件';
-    }
+    // ===== 出典FAQテーブル構築 =====
+    function buildSourceArea(sources) {
+      var container = document.createElement('div');
+      container.className = 'source-area';
 
-    // ===== 履歴テーブル描画 =====
-    function renderHistoryTable(items) {
-      elHistoryTbody.innerHTML = '';
-      for (var i = 0; i < items.length; i++) {
-        var item = items[i];
+      var label = document.createElement('div');
+      label.className = 'card-section-label';
+      label.textContent = '出典FAQ';
+      container.appendChild(label);
+
+      var table = document.createElement('table');
+      table.className = 'source-table';
+
+      // thead
+      var thead = document.createElement('thead');
+      var headerRow = document.createElement('tr');
+      var headers = ['質問文', '回答文', '類似度'];
+      for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.textContent = headers[h];
+        headerRow.appendChild(th);
+      }
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      // tbody
+      var tbody = document.createElement('tbody');
+      for (var i = 0; i < sources.length; i++) {
+        var s = sources[i];
         var tr = document.createElement('tr');
 
-        // 日時
-        var tdDate = document.createElement('td');
-        tdDate.className = 'td-datetime';
-        tdDate.textContent = formatDatetime(item.created_at);
-        tr.appendChild(tdDate);
-
-        // 質問（抜粋）
         var tdQ = document.createElement('td');
-        tdQ.className = 'td-question';
-        tdQ.textContent = truncate(item.question, 30);
-        tdQ.title = item.question;
+        tdQ.textContent = s.question;
         tr.appendChild(tdQ);
 
-        // 回答（抜粋）
         var tdA = document.createElement('td');
-        tdA.className = 'td-answer';
-        tdA.textContent = truncate(item.answer, 30);
-        tdA.title = item.answer;
+        tdA.textContent = s.answer;
         tr.appendChild(tdA);
 
-        // 状態
-        var tdS = document.createElement('td');
+        var tdC = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'confidence-badge';
+        badge.textContent = s.confidence.toFixed(2);
+        tdC.appendChild(badge);
+        tr.appendChild(tdC);
+
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      container.appendChild(table);
+
+      return container;
+    }
+
+    // ===== 履歴カード描画 =====
+    function renderHistoryCards(items) {
+      elHistoryCards.innerHTML = '';
+
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var card = document.createElement('div');
+        card.className = 'history-card';
+
+        // カードヘッダー（日時 + ステータス）
+        var header = document.createElement('div');
+        header.className = 'card-header';
+
+        var datetime = document.createElement('span');
+        datetime.className = 'card-datetime';
+        datetime.textContent = formatDatetime(item.created_at);
+        header.appendChild(datetime);
+
         var statusSpan = document.createElement('span');
         statusSpan.className = 'status-label ' + item.status;
         statusSpan.textContent = STATUS_LABELS[item.status] || item.status;
-        tdS.appendChild(statusSpan);
-        tr.appendChild(tdS);
+        header.appendChild(statusSpan);
 
-        // 詳細リンク
-        var tdD = document.createElement('td');
-        var link = document.createElement('a');
-        link.className = 'detail-link';
-        link.href = '/chat/history/' + item.history_id;
-        link.textContent = '詳細';
-        link.onclick = function (e) { e.preventDefault(); };
-        tdD.appendChild(link);
-        tr.appendChild(tdD);
+        card.appendChild(header);
 
-        elHistoryTbody.appendChild(tr);
+        // 質問セクション
+        var qSection = document.createElement('div');
+        qSection.className = 'card-section';
+
+        var qLabel = document.createElement('div');
+        qLabel.className = 'card-section-label';
+        qLabel.textContent = '質問';
+        qSection.appendChild(qLabel);
+
+        var qText = document.createElement('div');
+        qText.className = 'card-section-text';
+        qText.textContent = item.question;
+        qSection.appendChild(qText);
+
+        card.appendChild(qSection);
+
+        // 回答セクション
+        var aSection = document.createElement('div');
+        aSection.className = 'card-section';
+
+        var aLabel = document.createElement('div');
+        aLabel.className = 'card-section-label';
+        aLabel.textContent = '回答';
+        aSection.appendChild(aLabel);
+
+        var aText = document.createElement('div');
+        aText.className = 'card-section-text';
+        aText.textContent = item.answer;
+        aSection.appendChild(aText);
+
+        card.appendChild(aSection);
+
+        // 出典セクション
+        if (item.sources && item.sources.length > 0) {
+          var sourceArea = buildSourceArea(item.sources);
+          card.appendChild(sourceArea);
+        } else if (item.status === 'no_match' || item.status === 'ai_unavailable' || item.status === 'server_error') {
+          var noSourceMsg = document.createElement('div');
+          noSourceMsg.className = 'no-source-msg';
+          noSourceMsg.textContent = '出典が見つかりません';
+          card.appendChild(noSourceMsg);
+        }
+
+        elHistoryCards.appendChild(card);
       }
     }
 
@@ -558,22 +621,12 @@
 
       var data = getDummyHistoryList(pattern);
 
-      if (data.total === 0) {
+      if (data.items.length === 0) {
         // 0件: 空メッセージ表示
         elEmptyMsg.classList.remove('hidden');
       } else {
-        // 件数表示
-        elTotalCount.textContent = buildTotalCountText(data.total, data.offset, data.items.length);
-        elTotalCount.classList.remove('hidden');
-
-        // テーブル描画
-        renderHistoryTable(data.items);
-        elHistoryList.classList.remove('hidden');
-
-        // ページネーション
-        elPagination.classList.remove('hidden');
-        elPrevBtn.disabled = (data.offset === 0);
-        elNextBtn.disabled = (data.offset + data.limit >= data.total);
+        // カード描画
+        renderHistoryCards(data.items);
       }
     }
 

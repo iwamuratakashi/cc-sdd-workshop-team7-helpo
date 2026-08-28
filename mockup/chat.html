@@ -144,7 +144,6 @@
     .status-label.direct_faq    { background: #e0e7ff; color: #3730a3; }
     .status-label.no_match      { background: #fef3c7; color: #92400e; }
     .status-label.ai_unavailable { background: #fee2e2; color: #991b1b; }
-    .status-label.server_error  { background: #fee2e2; color: #991b1b; }
 
     /* ===== Source FAQ Area (回答エリア内に出典を表示) ===== */
     .source-area {
@@ -196,7 +195,7 @@
       font-weight: 600;
     }
 
-    /* ===== No Source / Guidance (回答エリア内) ===== */
+    /* ===== No Source (回答エリア内) ===== */
     .no-source-area {
       display: none;
       margin-top: 20px;
@@ -212,17 +211,6 @@
       font-size: 16px;
       color: #92400e;
       font-weight: 600;
-      margin-bottom: 16px;
-    }
-
-    .guidance-msg {
-      font-size: 16px;
-      line-height: 1.7;
-      color: #374151;
-      background: #fffbeb;
-      padding: 16px 24px;
-      border-radius: 8px;
-      border: 1px solid #fde68a;
     }
 
     /* ===== Loading ===== */
@@ -368,6 +356,29 @@
       margin-top: 8px;
     }
 
+    /* ===== Communication Error (画面上部) ===== */
+    .comm-error-area {
+      display: none;
+    }
+
+    .comm-error-area.visible {
+      display: block;
+    }
+
+    .comm-error-msg {
+      max-width: 720px;
+      margin: 0 auto;
+      margin-top: 16px;
+      padding: 12px 24px;
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      border-radius: 8px;
+      color: #991b1b;
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.7;
+    }
+
     /* ===== Utility ===== */
     .hidden {
       display: none !important;
@@ -395,7 +406,6 @@
       <button class="mockup-btn" onclick="setState('direct_faq')">FAQ直接回答（direct_faq）</button>
       <button class="mockup-btn" onclick="setState('no_match')">該当FAQなし（no_match）</button>
       <button class="mockup-btn" onclick="setState('ai_unavailable')">AI利用不可（ai_unavailable）</button>
-      <button class="mockup-btn" onclick="setState('server_error')">サーバエラー（server_error）</button>
     </div>
 
     <div class="mockup-btn-group">
@@ -405,9 +415,14 @@
     </div>
 
     <div class="mockup-btn-group">
-      <div class="mockup-btn-group-label">通信エラー</div>
-      <button class="mockup-btn" onclick="setState('error_500')">システムエラー（500）</button>
+      <div class="mockup-btn-group-label">通信エラー（HTTP 500・ネットワークエラー・FAQ検索失敗）</div>
+      <button class="mockup-btn" onclick="setState('error_500')">通信エラー（HTTP 500）</button>
     </div>
+  </div>
+
+  <!-- ===== 通信エラー表示エリア（画面上部・ヘッダー直下） ===== -->
+  <div id="comm-error-area" class="comm-error-area">
+    <div id="comm-error-msg" class="comm-error-msg"></div>
   </div>
 
   <!-- ===== メインコンテンツ ===== -->
@@ -444,10 +459,9 @@
         </table>
       </div>
 
-      <!-- 出典なし + 窓口案内（回答エリア内） -->
+      <!-- 出典なし（回答エリア内） -->
       <div id="no-source-area" class="no-source-area">
         <div class="no-source-msg">出典が見つかりません</div>
-        <div id="guidance-msg" class="guidance-msg"></div>
       </div>
     </div>
 
@@ -486,8 +500,7 @@
       ai_answer: 'AI回答',
       direct_faq: 'FAQ直接回答',
       no_match: '該当FAQなし',
-      ai_unavailable: 'AI利用不可',
-      server_error: 'サーバエラー'
+      ai_unavailable: 'AI利用不可'
     };
 
     function getDummyResponse(status) {
@@ -548,15 +561,6 @@
             sources: []
           };
 
-        case 'server_error':
-          return {
-            question: '出張申請の手順を教えてください',
-            answer: SERVER_ERROR_MESSAGE,
-            status: 'server_error',
-            answered_at: '2026-08-27T12:30:00Z',
-            sources: []
-          };
-
         default:
           return null;
       }
@@ -564,6 +568,8 @@
 
 
     // ===== DOM要素参照 =====
+    var elCommErrorArea = document.getElementById('comm-error-area');
+    var elCommErrorMsg  = document.getElementById('comm-error-msg');
     var elErrorArea    = document.getElementById('error-area');
     var elErrorMsg     = document.getElementById('error-msg');
     var elLoadingArea  = document.getElementById('loading-area');
@@ -573,7 +579,6 @@
     var elSourceArea   = document.getElementById('source-area');
     var elSourceTbody  = document.getElementById('source-tbody');
     var elNoSourceArea = document.getElementById('no-source-area');
-    var elGuidanceMsg  = document.getElementById('guidance-msg');
     var elQuestion     = document.getElementById('question');
     var elCharCount    = document.getElementById('char-count');
     var elSubmitBtn    = document.getElementById('submit-btn');
@@ -598,6 +603,8 @@
 
     // ===== 全エリアリセット =====
     function resetAll() {
+      elCommErrorArea.classList.remove('visible');
+      elCommErrorMsg.textContent = '';
       elErrorArea.classList.remove('visible');
       elLoadingArea.classList.remove('visible');
       elAnswerArea.classList.remove('visible');
@@ -608,8 +615,6 @@
       elStatusLabel.textContent = '';
       elStatusLabel.className = 'status-label';
       elSourceTbody.innerHTML = '';
-      elGuidanceMsg.textContent = '';
-      elGuidanceMsg.style.display = '';
       elSubmitBtn.disabled = false;
       elQuestion.disabled = false;
     }
@@ -653,17 +658,15 @@
       elSourceArea.classList.add('visible');
     }
 
-    // ===== 出典なし＋窓口案内表示（回答エリア内） =====
-    function showNoSourceWithGuidance() {
-      elGuidanceMsg.textContent = CONTACT_GUIDANCE;
-      elGuidanceMsg.style.display = '';
+    // ===== 出典なし表示（「出典が見つかりません」のみ） =====
+    function showNoSource() {
       elNoSourceArea.classList.add('visible');
     }
 
-    // ===== 出典なし表示のみ（窓口案内なし、server_error用） =====
-    function showNoSourceOnly() {
-      elGuidanceMsg.style.display = 'none';
-      elNoSourceArea.classList.add('visible');
+    // ===== 通信エラー表示（画面上部・ヘッダー直下） =====
+    function showCommError(message) {
+      elCommErrorMsg.textContent = message;
+      elCommErrorArea.classList.add('visible');
     }
 
     // ===== 状態切替メイン =====
@@ -714,16 +717,7 @@
           elQuestion.value = resp2.question;
           elCharCount.textContent = resp2.question.length + ' / 400';
           showAnswer(resp2);
-          showNoSourceWithGuidance();
-          break;
-        }
-
-        case 'server_error': {
-          var resp3 = getDummyResponse(state);
-          elQuestion.value = resp3.question;
-          elCharCount.textContent = resp3.question.length + ' / 400';
-          showAnswer(resp3);
-          showNoSourceOnly();
+          showNoSource();
           break;
         }
 
@@ -743,10 +737,10 @@
           break;
 
         case 'error_500':
+          // A9: 通信エラー（HTTP 500・ネットワークエラー）は画面上部に表示。FAQ検索失敗・予期しないサーバエラーもこのパスで処理
           elQuestion.value = '何か質問を入力した状態';
           elCharCount.textContent = elQuestion.value.length + ' / 400';
-          elErrorMsg.textContent = 'システムエラーが発生しました。しばらく時間をおいてから再度お試しください。';
-          elErrorArea.classList.add('visible');
+          showCommError(SERVER_ERROR_MESSAGE);
           break;
       }
     }

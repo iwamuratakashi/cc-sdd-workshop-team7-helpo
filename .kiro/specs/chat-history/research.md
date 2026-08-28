@@ -38,14 +38,16 @@
 - **Implications**: 詳細表示時に`faq_id`がNULLなら「削除済み」ラベルを表示する。スナップショット値はORMモデルから直接取得できる。
 
 ### 画面設計の参照
-- **Context**: ai-helpdesk-chatの設計書は履歴一覧・詳細画面の仕様を詳細に定義している。chat-historyがこれらの画面を所有する。
-- **Sources Consulted**: `.kiro/specs/ai-helpdesk-chat/design.md`（画面仕様セクション）、`mockup/chat.html`
+- **Context**: 要件の修正により、詳細画面と画面遷移がスコープ外となった。履歴画面は一覧画面のみで完結し、各履歴に質問日時・質問内容・回答・出典をインライン表示する。
+- **Sources Consulted**: `.kiro/specs/chat-history/requirements.md`（修正後）、`.kiro/specs/ai-helpdesk-chat/design.md`（画面仕様セクション）、`mockup/chat.html`、`mockup/history.html`
 - **Findings**:
-  - 履歴一覧: `/chat/history`、offset/limitページネーション、新しい順ソート、質問・回答の抜粋表示
-  - 履歴詳細: `/chat/history/{history_id}`、全文表示、スナップショット出典表示、削除済みラベル
+  - 履歴一覧: `/chat/history`、offset/limitページネーション、新しい順ソート
+  - 要件2.5により詳細画面（`/chat/history/{history_id}`）は提供しない
+  - 各履歴カードに質問全文・回答全文・出典FAQスナップショットをインライン表示する
+  - テーブル形式からカード形式に変更し、出典を各カード内に埋め込む
   - チャット画面から「履歴一覧」へのリンクが既に存在する
   - テンプレートはfoundationの`base.html`を継承する
-- **Implications**: chat-historyはこれらの画面仕様をそのまま採用し、`app/templates/history/`に配置する。
+- **Implications**: chat-historyは一覧画面（`list.html`）のみを`app/templates/history/`に配置する。詳細テンプレート（`detail.html`）は不要。リポジトリは出典のeager loadを一覧取得時に行う。
 
 ## Architecture Pattern Evaluation
 
@@ -73,9 +75,19 @@
 - **Rationale**: 既存の設計との整合性を維持し、マイグレーション順序の混乱を避ける。
 
 ### Decision: 画面エンドポイントの所有権
-- **Context**: ai-helpdesk-chatの設計書が`/chat/history`・`/chat/history/{id}`エンドポイントとテンプレートを定義済み。
-- **Selected Approach**: chat-historyがこれらのエンドポイントとテンプレートの実装所有権を持つ。`app/history/router.py`と`app/templates/history/`に配置する。ai-helpdesk-chatの`ChatRouter`は`/chat`と`/api/chat`のみを担当する。
-- **Rationale**: 読み取り側の責務をchat-historyに集約し、回答生成と履歴表示のコードを分離する。
+- **Context**: ai-helpdesk-chatの設計書が`/chat/history`・`/chat/history/{id}`エンドポイントとテンプレートを定義済みだったが、要件修正により詳細画面がスコープ外となった。
+- **Selected Approach**: chat-historyは一覧エンドポイント（`/chat/history`、`/api/chat/history`）のみの実装所有権を持つ。`app/history/router.py`と`app/templates/history/list.html`に配置する。詳細エンドポイント（`/chat/history/{id}`）は提供しない。ai-helpdesk-chatの`ChatRouter`は`/chat`と`/api/chat`のみを担当する。
+- **Rationale**: 要件2.5「詳細画面への遷移や別画面への画面遷移を提供せず、履歴画面単体で完結する」に準拠。一覧画面内で各履歴の質問・回答・出典を完結表示するため、詳細画面は不要。
+
+### Decision: 一覧画面でのカード形式＋出典インライン表示
+- **Context**: 要件修正により、詳細画面が廃止され、一覧画面で質問日時・質問内容・回答・出典を確認する設計が求められる。
+- **Alternatives Considered**:
+  1. テーブル形式で質問・回答を抜粋表示＋詳細リンク — 要件2.5に違反（詳細画面への遷移）。
+  2. テーブル形式で全文＋出典を表示 — テーブルでは出典の複数行表示が難しい。
+  3. カード形式で全文＋出典をインライン表示 — 各カードが質問・回答・出典を含む自己完結型。
+- **Selected Approach**: カード形式のリスト表示。各カードにヘッダー（日時＋ステータス）、質問全文、回答全文、出典FAQテーブルを含める。
+- **Rationale**: カード形式は各履歴が自己完結しており、出典テーブルの埋め込みが自然。一覧ページのスクロールで全情報が確認可能。
+- **Trade-offs**: 出典を含むためレスポンスサイズが大きくなるが、ページネーション（limit=20）で制御する。
 
 ## Risks & Mitigations
 - ai-helpdesk-chatの永続化実装がchat-historyの仕様を満たさないリスク → chat-historyの要件追跡テーブルで永続化仕様を明記し、実装時に`@kiro-validate-impl`で検証する。
